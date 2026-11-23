@@ -120,6 +120,22 @@ map.on("load", async () => {
   });
 
   info.textContent = "Choose an IGC file and click Upload.";
+
+  // If a "flight" query parameter is present, load and render the referenced
+  // flight from the flugbuech instance (used for deep links from other tools).
+  const flightId = new URLSearchParams(window.location.search).get("flight");
+  if (flightId) {
+    info.textContent = "Loading flight...";
+    try {
+      const res = await fetch(`/api/flight?flight=${encodeURIComponent(flightId)}`);
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      renderFlight(await res.json());
+    } catch (err) {
+      info.textContent = String(err?.message || err);
+    }
+  }
 });
 
 map.on("zoomend", () => {

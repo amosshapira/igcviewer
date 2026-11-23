@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -62,10 +63,13 @@ type trackSample struct {
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/flight", handleFlightUpload)
+	mux.HandleFunc("/api/flight", handleFlight)
 	mux.Handle("/", staticHandler())
 
-	addr := "localhost:8080"
+	addr := os.Getenv("IGCVIEWER_ADDR")
+	if addr == "" {
+		addr = "localhost:8080"
+	}
 	log.Printf("Server listening on http://%s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)

@@ -26,6 +26,21 @@ Upload an `.igc` file in the page header and click `Upload`.
 Multipart form field name:
 - `igc` (the uploaded `.igc` file)
 
+- `GET /api/flight?flight=<id>` -> fetch and parse the IGC file of a flight
+
+Only available when the binary is built with the `flugbuech` build tag
+(`go build -tags flugbuech`). Fetches the IGC file of the flight with the
+given ID from the flugbuech instance configured using `IGCVIEWER_UPSTREAM`,
+authenticating with the token configured using `IGCVIEWER_TOKEN`.
+
+## Configuration
+
+- `IGCVIEWER_ADDR`: address to listen on (default: `localhost:8080`)
+- `IGCVIEWER_UPSTREAM`: base URL of the flugbuech instance to fetch flights
+  from (default: disabled)
+- `IGCVIEWER_TOKEN`: access token sent to the flugbuech API when fetching
+  flights (default: empty)
+
 # External resources
 
 For rendering the map, several external sources are used/loaded:
