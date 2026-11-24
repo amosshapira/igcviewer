@@ -324,7 +324,7 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
         pickable: false,
         getPosition: (d) => d.position,
         getAngle: (d) => d.angle || 0,
-        getIcon: () => gliderIcon,
+        getIcon: () => markerIcon,
         sizeUnits: "meters",
         getSize: 95,
         sizeMinPixels: 28,
@@ -380,6 +380,32 @@ function createGliderIcon() {
     anchorY: 128,
   };
 }
+
+function createParagliderIcon() {
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <path d="M8 40 C24 12, 72 12, 88 40 L80 42 C66 24, 30 24, 16 42 Z" fill="#111111"/>
+  <line x1="30" y1="40" x2="46" y2="66" stroke="#dbe4f3" stroke-width="2.8"/>
+  <line x1="66" y1="40" x2="50" y2="66" stroke="#dbe4f3" stroke-width="2.8"/>
+  <ellipse cx="48" cy="74" rx="7" ry="9" fill="#f8fafc"/>
+  <circle cx="48" cy="62" r="3.8" fill="#f8fafc"/>
+  <line x1="48" y1="66" x2="48" y2="83" stroke="#f8fafc" stroke-width="2"/>
+</svg>`;
+  return {
+    id: "paraglider",
+    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    width: 96,
+    height: 96,
+    anchorY: 72,
+  };
+}
+
+// Replay marker selection: "glider" (default) or "paraglider", chosen via
+// the "marker" query parameter (used by flugbuech deep links; see the
+// per-user track marker preference).
+const MARKER_PARAM = new URLSearchParams(window.location.search).get("marker");
+const markerIcon =
+  MARKER_PARAM === "paraglider" ? createParagliderIcon() : createGliderIcon();
 
 function initialHeading(path) {
   if (!path || path.length < 2) {
