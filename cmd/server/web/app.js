@@ -415,11 +415,9 @@ function buildAdjustedPath(path) {
     const [lon, lat, alt] = c;
     let adjustedAlt = Number(alt) + ALTITUDE_VISUAL_OFFSET_M;
 
-    if (typeof map.queryTerrainElevation === "function") {
-      const terrainAlt = map.queryTerrainElevation([lon, lat], { exaggerated: false });
-      if (terrainAlt !== null && terrainAlt !== undefined) {
-        adjustedAlt = Math.max(adjustedAlt, terrainAlt + MIN_TERRAIN_CLEARANCE_M);
-      }
+    const terrainAlt = map.queryTerrainElevation([lon, lat]);
+    if (terrainAlt !== null && terrainAlt !== undefined) {
+      adjustedAlt = Math.max(adjustedAlt, terrainAlt + MIN_TERRAIN_CLEARANCE_M);
     }
     return [lon, lat, adjustedAlt];
   });
@@ -503,23 +501,6 @@ function tickPlayback(ts) {
   }
 
   animationFrameId = requestAnimationFrame(tickPlayback);
-}
-
-function buildVisiblePath(path, detail) {
-  if (!Array.isArray(path) || path.length === 0) {
-    return [];
-  }
-  if (!detail || !detail.position) {
-    return [path[0]];
-  }
-  if (detail.segIndex >= path.length) {
-    return path;
-  }
-
-  const upto = Math.max(1, Math.min(detail.segIndex, path.length - 1));
-  const partial = path.slice(0, upto);
-  partial.push(detail.position);
-  return partial;
 }
 
 function buildRouteSegments(path, samples) {

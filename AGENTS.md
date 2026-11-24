@@ -92,8 +92,9 @@ only matters locally.
   `reclampTrackOnTerrain` on `map.once("idle")` after the initial
   `fitBounds`. A browser reload "fixes" it because tiles are cached.
 - **`queryTerrainElevation`**: since maplibre v5 it returns the actual
-  altitude; the `{exaggerated: false}` option is a no-op (kept). With
-  `TERRAIN_EXAGGERATION = 1.0` the old semantics coincide.
+  altitude (unexaggerated by definition); the old `{exaggerated: false}`
+  option is gone. With `TERRAIN_EXAGGERATION = 1.0` the semantics are
+  equivalent either way.
 - **Far-field imagery band at pitch**: a horizontal band of mismatched
   satellite imagery near the horizon in pitched views. This is **content in
   the Esri World_Imagery mosaic** (proven: present even with all DEM tiles
