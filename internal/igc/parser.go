@@ -163,12 +163,15 @@ func computeMaxWindowedClimbRate(timesSec []int, altsM []int, windowSec float64)
 }
 
 func parseDateHeader(line string) (time.Time, bool) {
-	// Format: HFDTEddmmyy
+	// Format: HFDTEddmmyy or HFDTEDATE:ddmmyy[,nn]
 	idx := strings.Index(line, "HFDTE")
-	if idx < 0 || len(line) < idx+11 {
+	if idx < 0 {
 		return time.Time{}, false
 	}
-	raw := line[idx+5 : idx+11]
+	raw := strings.TrimPrefix(line[idx+5:], "DATE:")
+	if len(raw) < 6 {
+		return time.Time{}, false
+	}
 	day, err1 := strconv.Atoi(raw[0:2])
 	month, err2 := strconv.Atoi(raw[2:4])
 	year2, err3 := strconv.Atoi(raw[4:6])

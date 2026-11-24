@@ -273,8 +273,28 @@ function renderFlight(flight) {
     { padding: 80, duration: 1200 }
   );
 
+  // Re-clamp the track once the map has settled on the new view: terrain
+  // elevation tiles for the flight area might only be loaded by then. While
+  // the terrain is still loading, the track would otherwise stay clamped
+  // against stale (or missing) elevation data and float above the map.
+  map.once("idle", () => reclampTrackOnTerrain(coords));
+
   renderInfo(flight);
   updateReplayStats({ speedKmh: 0, climbRateMs: 0, progress: 0, elapsedSec: 0 });
+}
+
+function reclampTrackOnTerrain(coords) {
+  if (map.isMoving()) {
+    // Still animating (e.g. the fitBounds flight): wait for the next idle.
+    map.once("idle", () => reclampTrackOnTerrain(coords));
+    return;
+  }
+  if (currentPath.length < 2) {
+    return;
+  }
+  currentPath = buildAdjustedPath(coords);
+  currentSegments = buildRouteSegments(currentPath, currentSamples);
+  rerenderTrackForCurrentState();
 }
 
 function renderDeckLayers(path, marker, detail, revealTrack) {
