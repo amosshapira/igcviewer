@@ -17,7 +17,7 @@ let animationFrameId = null;
 let isPlaying = false;
 let playbackProgress = 0;
 let playbackStartTs = 0;
-const paragliderIcon = createParagliderIcon();
+const gliderIcon = createGliderIcon();
 
 const TERRAIN_EXAGGERATION = 1.0;
 const MIN_TERRAIN_CLEARANCE_M = 15;
@@ -324,7 +324,7 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
         pickable: false,
         getPosition: (d) => d.position,
         getAngle: (d) => d.angle || 0,
-        getIcon: () => paragliderIcon,
+        getIcon: () => gliderIcon,
         sizeUnits: "meters",
         getSize: 95,
         sizeMinPixels: 28,
@@ -368,22 +368,16 @@ function rerenderTrackForCurrentState() {
   renderDeckLayers(currentPath, markerFromDetail(detail), detail, revealTrack);
 }
 
-function createParagliderIcon() {
-  const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
-  <path d="M8 40 C24 12, 72 12, 88 40 L80 42 C66 24, 30 24, 16 42 Z" fill="#111111"/>
-  <line x1="30" y1="40" x2="46" y2="66" stroke="#dbe4f3" stroke-width="2.8"/>
-  <line x1="66" y1="40" x2="50" y2="66" stroke="#dbe4f3" stroke-width="2.8"/>
-  <ellipse cx="48" cy="74" rx="7" ry="9" fill="#f8fafc"/>
-  <circle cx="48" cy="62" r="3.8" fill="#f8fafc"/>
-  <line x1="48" y1="66" x2="48" y2="83" stroke="#f8fafc" stroke-width="2"/>
-</svg>`;
+function createGliderIcon() {
+  // Glider silhouette marker. Image source:
+  // https://freepngimg.com/png/75689-glider/icon (CC BY-NC 4.0, FreePNGimg),
+  // pre-rotated so the nose points up (bearing 0 = north).
   return {
-    id: "paraglider",
-    url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
-    width: 96,
-    height: 96,
-    anchorY: 72,
+    id: "glider",
+    url: "/glider-marker.png",
+    width: 237,
+    height: 256,
+    anchorY: 128,
   };
 }
 

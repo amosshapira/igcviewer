@@ -41,6 +41,12 @@ authenticating with the token configured using `IGCVIEWER_TOKEN`.
 - `IGCVIEWER_TOKEN`: access token sent to the flugbuech API when fetching
   flights (default: empty)
 
+# Credits
+
+- Replay marker icon: [Glider icon by FreePNGimg](https://freepngimg.com/png/75689-glider/icon),
+  licensed [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+  (non-commercial use with attribution).
+
 # External resources
 
 For rendering the map, several external sources are used/loaded:
