@@ -7,6 +7,13 @@ const followCamSelect = document.getElementById("followCam");
 const marker3dToggle = document.getElementById("marker3d");
 const info = document.getElementById("info");
 const topbar = document.querySelector(".topbar");
+const profilePanel = document.getElementById("profilePanel");
+const profileToggleBtn = document.getElementById("profileToggleBtn");
+const profileCanvas = document.getElementById("profileCanvas");
+const profileAltMslEl = document.getElementById("profileAltMsl");
+const profileAglEl = document.getElementById("profileAgl");
+const profileClimbEl = document.getElementById("profileClimb");
+const profileSpeedEl = document.getElementById("profileSpeed");
 
 let deckOverlay;
 let currentPath = [];
@@ -43,6 +50,22 @@ const TRACK_MAIN_MIN_PIXELS_NEAR = 2;
 const TRACK_MAIN_MIN_PIXELS_VERY_NEAR = 1.5;
 const FOLLOW_CAM_MAX_ZOOM = 16;
 const FOLLOW_CAM_PITCH_SOFT_LIMIT = 55;
+
+// Altitude + ground profile panel (optional, WeGlide-style bottom chart).
+const PROFILE_PANEL_STORAGE_KEY = "flugbuech-profile-panel";
+const PROFILE_CLIMB_WINDOW_MS = 8000;
+const PROFILE_THERMAL_CLIMB_THRESHOLD_MS = 0.5;
+const PROFILE_THERMAL_MIN_DURATION_MS = 20000;
+const PROFILE_GROUND_MAX_ATTEMPTS = 30;
+const PROFILE_CHART_MARGIN = { left: 52, right: 12, top: 8, bottom: 20 };
+const PROFILE_CHART_COLORS = {
+  altitudeLine: "#3b6ec8",
+  ground: "#a97e57",
+  thermal: "#c026d3",
+  marker: "#1d4ed8",
+  grid: "rgba(255, 255, 255, 0.08)",
+  label: "#99a7b8",
+};
 
 let latestPlaybackDetail = null;
 let syncingFollowCamera = false;
@@ -101,6 +124,17 @@ function updateCurrentMarker(detail) {
     ],
   });
 }
+
+// Profile panel state: ground elevations per sample (null when unknown),
+// detected thermal segments, and an offscreen canvas holding the static
+// chart (redrawn per replay tick by blitting + overlaying the marker).
+let profileVisible = false;
+let profileGroundM = [];
+let profileGroundAvailable = false;
+let profileGroundAttempts = 0;
+let profileThermals = [];
+let profileStaticCanvas = null;
+let profileChartGeom = null;
 
 const map = new maplibregl.Map({
   container: "map",
@@ -276,6 +310,29 @@ followCamSelect?.addEventListener("change", () => {
   updateFollowCamera(latestPlaybackDetail);
 });
 
+profileToggleBtn.addEventListener("click", () => {
+  setProfileVisible(!profileVisible);
+});
+
+window.addEventListener("resize", () => {
+  if (!profileVisible) {
+    return;
+  }
+  drawProfileChart();
+  drawProfileMarker(currentProfileTimeMs());
+});
+
+// Restore the persisted panel preference (default: hidden).
+setProfileVisible(
+  (() => {
+    try {
+      return localStorage.getItem(PROFILE_PANEL_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  })()
+);
+
 async function uploadFlight(file) {
   const formData = new FormData();
   formData.append("igc", file, file.name);
@@ -351,6 +408,12 @@ function renderFlight(flight) {
   // the terrain is still loading, the track would otherwise stay clamped
   // against stale (or missing) elevation data and float above the map.
   map.once("idle", () => reclampTrackOnTerrain(coords));
+
+  // Reset the profile panel for the new flight: the altitude line and the
+  // thermal markers can be drawn right away; the ground profile is sampled
+  // once the terrain elevation tiles have loaded (see map idle above).
+  resetProfileForFlight();
+  scheduleGroundProfileComputation();
 
   renderInfo(flight);
   updateReplayStats({ speedKmh: 0, climbRateMs: 0, progress: 0, elapsedSec: 0 });
@@ -648,7 +711,9 @@ function tickPlayback(ts) {
     updateCurrentMarker(detail);
   }
   renderDeckLayers(currentPath, markerFromDetail(detail), detail, true);
-  updateReplayStats(computePlaybackStats(detail));
+  const stats = computePlaybackStats(detail);
+  updateReplayStats(stats);
+  updateProfileReplay(detail, stats);
   if (isFollowCamEnabled()) {
     updateFollowCamera(detail);
   }
@@ -855,6 +920,427 @@ function computeWindowedClimbRateMs(centerTimeMs, segIndex, windowMs) {
   }
 
   return (currentSamples[right].altM - currentSamples[left].altM) / dtSec;
+}
+
+// ---------------------------------------------------------------------------
+// Optional bottom panel: altitude (MSL) + ground profile chart, WeGlide-style.
+// Drawn with the 2D canvas API; the static chart is rendered into an
+// offscreen canvas once per flight/resize and blitted on every replay tick
+// with the moving marker line overlayed.
+// ---------------------------------------------------------------------------
+
+function setProfileVisible(visible) {
+  profileVisible = visible;
+  profilePanel.hidden = !visible;
+  profileToggleBtn.classList.toggle("active", visible);
+  profileToggleBtn.setAttribute("aria-pressed", String(visible));
+  try {
+    localStorage.setItem(PROFILE_PANEL_STORAGE_KEY, visible ? "1" : "0");
+  } catch {
+    // localStorage may be unavailable (privacy mode); the toggle still works.
+  }
+  if (visible) {
+    drawProfileChart();
+    const detail = latestPlaybackDetail;
+    updateProfileReplay(detail, detail ? computePlaybackStats(detail) : null);
+  }
+}
+
+// Clear per-flight profile state and redraw with what is available right
+// away (altitude line + thermal markers); the ground profile follows later,
+// once the terrain elevation tiles have loaded.
+function resetProfileForFlight() {
+  profileGroundM = [];
+  profileGroundAvailable = false;
+  profileGroundAttempts = 0;
+  computeProfileThermals();
+  drawProfileChart();
+  if (profileVisible) {
+    const detail = latestPlaybackDetail;
+    updateProfileReplay(detail, detail ? computePlaybackStats(detail) : null);
+  }
+}
+
+// The ground profile is sampled once the map is idle after the flight
+// rendered (that is when the terrain elevation tiles of the flight area are
+// loaded); while the map is still moving, wait for the next idle.
+function scheduleGroundProfileComputation() {
+  map.once("idle", () => {
+    if (map.isMoving()) {
+      scheduleGroundProfileComputation();
+      return;
+    }
+    computeGroundProfile();
+  });
+}
+
+function computeGroundProfile() {
+  if (currentSamples.length < 2) {
+    return;
+  }
+
+  const elevations = currentSamples.map((s) => {
+    const elevation = map.queryTerrainElevation([s.lon, s.lat]);
+    return typeof elevation === "number" && Number.isFinite(elevation) ? elevation : null;
+  });
+
+  const knownCount = elevations.filter((e) => e !== null).length;
+  // Degrade gracefully: when the terrain data is (mostly) unavailable, show
+  // the altitude line without the ground profile — but retry on later idle
+  // events first, since the DEM tiles may still be loading.
+  if (knownCount < elevations.length * 0.5) {
+    profileGroundM = [];
+    profileGroundAvailable = false;
+    profileGroundAttempts += 1;
+    if (profileGroundAttempts < PROFILE_GROUND_MAX_ATTEMPTS) {
+      scheduleGroundProfileComputation();
+    }
+    return;
+  }
+
+  fillMissingElevations(elevations);
+  profileGroundM = elevations;
+  profileGroundAvailable = true;
+
+  drawProfileChart();
+  drawProfileMarker(currentProfileTimeMs());
+}
+
+// Linearly interpolate elevation gaps between known samples so the ground
+// profile polygon has no holes.
+function fillMissingElevations(elevations) {
+  let i = 0;
+  while (i < elevations.length) {
+    if (elevations[i] !== null) {
+      i += 1;
+      continue;
+    }
+    const gapStart = i;
+    while (i < elevations.length && elevations[i] === null) {
+      i += 1;
+    }
+    const prevIdx = gapStart - 1;
+    const nextIdx = i;
+    const prevVal = prevIdx >= 0 ? elevations[prevIdx] : (nextIdx < elevations.length ? elevations[nextIdx] : null);
+    const nextVal = nextIdx < elevations.length ? elevations[nextIdx] : prevVal;
+    if (prevVal === null || nextVal === null) {
+      continue;
+    }
+    const span = Math.max(nextIdx - prevIdx, 1);
+    for (let j = gapStart; j < nextIdx; j++) {
+      elevations[j] = lerp(prevVal, nextVal, (j - prevIdx) / span);
+    }
+  }
+}
+
+// Thermal segments: runs of samples whose windowed climb rate (the same
+// smoothing the replay climb display uses) stays above a sustained threshold.
+function computeProfileThermals() {
+  profileThermals = [];
+  if (currentSamples.length < 3) {
+    return;
+  }
+
+  const climbing = currentSamples.map((s, i) =>
+    i > 0 &&
+    i < currentSamples.length - 1 &&
+    computeWindowedClimbRateMs(s.timeMs, i, PROFILE_CLIMB_WINDOW_MS) > PROFILE_THERMAL_CLIMB_THRESHOLD_MS
+  );
+
+  let startIdx = -1;
+  const runs = [];
+  for (let i = 0; i <= climbing.length; i++) {
+    const isClimbing = i < climbing.length && climbing[i];
+    if (isClimbing && startIdx < 0) {
+      startIdx = i;
+    } else if (!isClimbing && startIdx >= 0) {
+      runs.push({ startIdx, endIdx: i - 1 });
+      startIdx = -1;
+    }
+  }
+
+  // Merge runs separated by short gaps: lift that only dips below the
+  // threshold briefly is one thermal, not several.
+  const MERGE_GAP_MS = 90000;
+  for (const run of runs) {
+    const last = profileThermals[profileThermals.length - 1];
+    const gapMs = last ? currentSamples[run.startIdx].timeMs - currentSamples[last.endIdx].timeMs : Infinity;
+    if (last && gapMs < MERGE_GAP_MS) {
+      last.endIdx = run.endIdx;
+    } else {
+      profileThermals.push({ ...run });
+    }
+  }
+
+  // Only keep climbs that are sustained for a meaningful duration.
+  profileThermals = profileThermals.filter(
+    (th) => currentSamples[th.endIdx].timeMs - currentSamples[th.startIdx].timeMs >= PROFILE_THERMAL_MIN_DURATION_MS
+  );
+}
+
+function drawProfileChart() {
+  if (!profileVisible) {
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = profileCanvas.clientWidth;
+  const cssH = profileCanvas.clientHeight;
+  if (cssW < 40 || cssH < 40) {
+    return;
+  }
+  profileCanvas.width = Math.round(cssW * dpr);
+  profileCanvas.height = Math.round(cssH * dpr);
+
+  profileStaticCanvas = document.createElement("canvas");
+  profileStaticCanvas.width = profileCanvas.width;
+  profileStaticCanvas.height = profileCanvas.height;
+  const ctx = profileStaticCanvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  profileChartGeom = null;
+
+  if (currentSamples.length < 2) {
+    return;
+  }
+
+  const { left, right, top, bottom } = PROFILE_CHART_MARGIN;
+  const plotW = cssW - left - right;
+  const plotH = cssH - top - bottom;
+  if (plotW < 40 || plotH < 40) {
+    return;
+  }
+
+  const t0 = currentSamples[0].timeMs;
+  const t1 = currentSamples[currentSamples.length - 1].timeMs;
+  if (!(t1 > t0)) {
+    return;
+  }
+
+  let dataMin = Infinity;
+  let dataMax = -Infinity;
+  for (const s of currentSamples) {
+    if (s.altM < dataMin) {
+      dataMin = s.altM;
+    }
+    if (s.altM > dataMax) {
+      dataMax = s.altM;
+    }
+  }
+  if (profileGroundAvailable) {
+    for (const g of profileGroundM) {
+      if (g !== null && g < dataMin) {
+        dataMin = g;
+      }
+    }
+  }
+
+  const pad = (dataMax - dataMin) * 0.08 || 50;
+  const yStep = niceStep(dataMax - dataMin + 2 * pad, 5);
+  // Anchor the axis bottom at the step containing the data minimum (not
+  // below it): avoids a band of dead space under low-lying terrain.
+  const yMin = Math.floor(dataMin / yStep) * yStep;
+  const yMax = Math.ceil((dataMax + pad) / yStep) * yStep;
+
+  const xOf = (tMs) => left + ((tMs - t0) / (t1 - t0)) * plotW;
+  const yOf = (alt) => top + (1 - (alt - yMin) / (yMax - yMin)) * plotH;
+
+  profileChartGeom = { t0, t1, left, top, plotW, plotH };
+  const colors = PROFILE_CHART_COLORS;
+
+  // Horizontal grid + altitude axis labels.
+  ctx.font = "10px sans-serif";
+  ctx.lineWidth = 1;
+  const yTickCount = Math.round((yMax - yMin) / yStep);
+  for (let i = 0; i <= yTickCount; i++) {
+    const alt = yMin + i * yStep;
+    const y = Math.round(yOf(alt)) + 0.5;
+    ctx.strokeStyle = colors.grid;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + plotW, y);
+    ctx.stroke();
+    ctx.fillStyle = colors.label;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(alt.toLocaleString("en-US"), left - 6, y);
+  }
+
+  // Time axis (HH:MM), ticks aligned to whole multiples of the step.
+  const durationMin = (t1 - t0) / 60000;
+  const minuteSteps = [5, 10, 15, 30, 60, 120, 240, 480];
+  let tickMin = minuteSteps[minuteSteps.length - 1];
+  for (const candidate of minuteSteps) {
+    if (durationMin / candidate <= 8) {
+      tickMin = candidate;
+      break;
+    }
+  }
+  const tickMs = tickMin * 60000;
+  for (let t = Math.ceil(t0 / tickMs) * tickMs; t <= t1; t += tickMs) {
+    const x = Math.round(xOf(t)) + 0.5;
+    ctx.strokeStyle = colors.grid;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, top + plotH);
+    ctx.stroke();
+    ctx.fillStyle = colors.label;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(formatHHMM(t), x, top + plotH + 4);
+  }
+
+  // Thermal markers: vertical magenta lines at the start of each climb
+  // (like WeGlide's climb markers).
+  for (const thermal of profileThermals) {
+    const xLine = Math.round(xOf(currentSamples[thermal.startIdx].timeMs)) + 0.5;
+    ctx.strokeStyle = colors.thermal;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xLine, top);
+    ctx.lineTo(xLine, top + plotH);
+    ctx.stroke();
+  }
+
+  // Ground profile under the track (brown filled area).
+  if (profileGroundAvailable) {
+    ctx.beginPath();
+    ctx.moveTo(xOf(t0), top + plotH);
+    for (let i = 0; i < currentSamples.length; i++) {
+      const ground = profileGroundM[i];
+      if (ground === null) {
+        continue;
+      }
+      ctx.lineTo(xOf(currentSamples[i].timeMs), yOf(ground));
+    }
+    ctx.lineTo(xOf(t1), top + plotH);
+    ctx.closePath();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = colors.ground;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Altitude (MSL) line over time.
+  ctx.beginPath();
+  for (let i = 0; i < currentSamples.length; i++) {
+    const x = xOf(currentSamples[i].timeMs);
+    const y = yOf(currentSamples[i].altM);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = colors.altitudeLine;
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+// Replay time of the marker line, interpolated like computePlaybackStats.
+function currentProfileTimeMs() {
+  if (!currentSamples.length) {
+    return null;
+  }
+  const detail = latestPlaybackDetail;
+  if (!detail || detail.segIndex <= 0 || detail.segIndex >= currentSamples.length) {
+    return currentSamples[0].timeMs;
+  }
+  const prev = currentSamples[detail.segIndex - 1];
+  const next = currentSamples[detail.segIndex];
+  return prev.timeMs + (next.timeMs - prev.timeMs) * detail.segT;
+}
+
+function drawProfileMarker(tMs) {
+  if (!profileVisible || !profileChartGeom || !profileStaticCanvas || tMs === null) {
+    return;
+  }
+
+  const ctx = profileCanvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, profileCanvas.width, profileCanvas.height);
+  ctx.drawImage(profileStaticCanvas, 0, 0);
+
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const geom = profileChartGeom;
+  const x = geom.left + clamp((tMs - geom.t0) / (geom.t1 - geom.t0), 0, 1) * geom.plotW;
+  ctx.strokeStyle = PROFILE_CHART_COLORS.marker;
+  ctx.fillStyle = PROFILE_CHART_COLORS.marker;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, geom.top);
+  ctx.lineTo(x, geom.top + geom.plotH);
+  ctx.stroke();
+  // Small cap triangle at the top, like WeGlide's replay cursor.
+  ctx.beginPath();
+  ctx.moveTo(x - 4, geom.top);
+  ctx.lineTo(x + 4, geom.top);
+  ctx.lineTo(x, geom.top + 6);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Stats row at the replay position: altitude MSL, height AGL (altitude minus
+// ground elevation under that point), climb rate and speed.
+function updateProfileReplay(detail, stats) {
+  if (!profileVisible) {
+    return;
+  }
+
+  const altMsl = sampleAltitudeAtDetail(detail);
+  const groundM = groundElevationAtDetail(detail);
+  profileAltMslEl.textContent = altMsl === null ? "–" : `${Math.round(altMsl)} m`;
+  profileAglEl.textContent = altMsl === null || groundM === null ? "–" : `${Math.round(altMsl - groundM)} m`;
+  profileClimbEl.textContent = stats ? formatClimbRate(stats.climbRateMs) : "–";
+  profileSpeedEl.textContent = stats ? `${stats.speedKmh.toFixed(1)} km/h` : "–";
+
+  drawProfileMarker(currentProfileTimeMs());
+}
+
+function sampleAltitudeAtDetail(detail) {
+  if (!currentSamples.length) {
+    return null;
+  }
+  if (!detail || detail.segIndex <= 0 || detail.segIndex >= currentSamples.length) {
+    return currentSamples[0].altM;
+  }
+  const prev = currentSamples[detail.segIndex - 1];
+  const next = currentSamples[detail.segIndex];
+  return lerp(prev.altM, next.altM, detail.segT);
+}
+
+function groundElevationAtDetail(detail) {
+  if (!profileGroundAvailable || !currentSamples.length) {
+    return null;
+  }
+  if (!detail || detail.segIndex <= 0 || detail.segIndex >= currentSamples.length) {
+    return profileGroundM[0];
+  }
+  const prev = profileGroundM[detail.segIndex - 1];
+  const next = profileGroundM[detail.segIndex];
+  if (prev === null || next === null) {
+    return null;
+  }
+  return lerp(prev, next, detail.segT);
+}
+
+function niceStep(range, targetTicks) {
+  const rough = Math.max(range / targetTicks, 1e-6);
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  for (const mantissa of [1, 2, 2.5, 5, 10]) {
+    if (mantissa * pow >= rough) {
+      return mantissa * pow;
+    }
+  }
+  return 10 * pow;
+}
+
+function formatHHMM(tMs) {
+  const d = new Date(tMs);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function updateReplayStats(stats) {
