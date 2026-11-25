@@ -32,8 +32,28 @@ bumped to maplibre-gl 5.24.1 / deck.gl 9.4.2.
   terrain elevation tiles have loaded (retried on subsequent idle
   events); when terrain data is unavailable the chart degrades to the
   altitude line without the ground profile.
+- **Rendering style option** (`?style=`): `ground` (default; maplibre
+  terrain, track clamped onto the terrain surface) or `deck`
+  (experimental; the terrain mesh and imagery rendered by deck.gl's
+  `TerrainLayer`, with the track flying at true altitude in the same
+  projection and deck-side start/end markers). Tile LOD steps at terrain
+  edges are a known cosmetic issue in the deck style.
+- **2D replay marker by default** with a "3D Marker" top bar toggle
+  (persisted in `localStorage` as `flugbuech-marker-3d`): the default
+  marker is a map-drawn dot at the current fix's ground position — immune
+  to the marker-vs-terrain datum mismatch; the 3D option shows the
+  glider/paraglider icon at flight altitude.
 
 ## Fixed
+
+- **Track/marker occluded by the terrain in interleaved mode** (`ce2f298`):
+  deck.gl layers sharing maplibre's WebGL context are depth-composited
+  against the rendered terrain mesh, but deck geometry uses a different
+  vertical datum (known upstream limitation, deck.gl #7064) — parts of the
+  track and the marker were hidden behind the terrain, which read as a
+  "disconnected/reversed" replay. Depth testing is disabled in ground
+  style (the track always draws over the terrain); deck style keeps
+  natural depth, since its terrain belongs to deck.gl itself.
 
 - **`HFDTEDATE:ddmmyy` header parsing** (`a558f74`): upstream's
   `parseDateHeader` expects the date directly after `HFDTE` (e.g.
