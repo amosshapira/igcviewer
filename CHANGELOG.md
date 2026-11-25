@@ -9,11 +9,29 @@ spec-conformant headers** (upstream only parses the `HFDTEddmmyy` short
 form, so e.g. Naviter Oudie files end up with zero dates), fixes the
 **floating track** that occurs when a flight renders before its terrain
 elevation data has loaded, adds a **`?marker=` choice between glider and
-paraglider replay markers**, a **favicon**, an **`IGCVIEWER_ADDR`**
+paraglider replay markers**, an **optional altitude/ground profile bottom
+panel**, a **favicon**, an **`IGCVIEWER_ADDR`**
 listen-address override plus a **multi-stage Dockerfile** for container
 deployments, and an **optional flugbuech integration** (behind a build tag)
 that can render flights straight from a flugbuech instance. Rendering stack
 bumped to maplibre-gl 5.24.1 / deck.gl 9.4.2.
+
+## Added
+
+- **Optional altitude + ground profile panel** (WeGlide-style): a
+  "Profile" toggle in the top bar (persisted in
+  `localStorage` as `flugbuech-profile-panel`, default hidden) shows a
+  bottom panel with a 2D-canvas chart — blue altitude (MSL) line over
+  time, brown filled ground profile under the track, magenta vertical
+  markers at sustained thermal climbs (windowed climb rate > 0.5 m/s,
+  short gaps merged), an HH:MM time axis, a metre altitude axis, and a
+  vertical marker line at the current replay position. A stats row above
+  the chart shows altitude MSL, height AGL (altitude minus ground
+  elevation), climb rate and speed at the replay position. The ground
+  profile is sampled lazily via `map.queryTerrainElevation` once the
+  terrain elevation tiles have loaded (retried on subsequent idle
+  events); when terrain data is unavailable the chart degrades to the
+  altitude line without the ground profile.
 
 ## Fixed
 

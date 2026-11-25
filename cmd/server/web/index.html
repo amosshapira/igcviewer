@@ -41,6 +41,7 @@
           <option value="on">On</option>
         </select>
         <button id="playBtn" disabled>Play</button>
+        <button id="profileToggleBtn" type="button" aria-pressed="false">Profile</button>
       </div>
     </header>
     <main>
@@ -50,6 +51,15 @@
       </aside>
       <section id="map"></section>
     </main>
+    <section id="profilePanel" class="profile-panel" hidden>
+      <div class="profile-stats" id="profileStats">
+        <div><span class="k">Alt MSL:</span> <span class="v" id="profileAltMsl">–</span></div>
+        <div><span class="k">Height AGL:</span> <span class="v" id="profileAgl">–</span></div>
+        <div><span class="k">Climb:</span> <span class="v" id="profileClimb">–</span></div>
+        <div><span class="k">Speed:</span> <span class="v" id="profileSpeed">–</span></div>
+      </div>
+      <canvas id="profileCanvas"></canvas>
+    </section>
 
     <script src="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/deck.gl@9.4.2/dist.min.js"></script>

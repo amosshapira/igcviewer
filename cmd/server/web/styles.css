@@ -55,6 +55,10 @@ button {
   border-color: color-mix(in oklab, var(--accent), white 15%);
 }
 
+button.active {
+  background: color-mix(in oklab, var(--accent), #071727 70%);
+}
+
 select option {
   background: #0a1e32;
   color: #f5f9ff;
@@ -114,6 +118,50 @@ main {
   .panel {
     width: calc(100% - 2rem);
     max-height: 35%;
+  }
+}
+
+/* Optional bottom panel with the altitude + ground profile chart. Sits
+   below <main>; body is a flex column, so the map keeps the remaining
+   space when the panel is shown. */
+.profile-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 19, 31, 0.92);
+}
+
+.profile-panel[hidden] {
+  display: none;
+}
+
+.profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.4rem;
+  padding: 0.35rem 1rem 0.15rem;
+  font-size: 0.85rem;
+}
+
+.profile-stats .k {
+  color: var(--muted);
+}
+
+.profile-stats .v {
+  color: var(--text);
+  font-weight: 600;
+}
+
+#profileCanvas {
+  display: block;
+  width: 100%;
+  height: 170px;
+}
+
+@media (max-width: 900px) {
+  #profileCanvas {
+    height: 120px;
   }
 }
 
