@@ -14,9 +14,19 @@ for the tisot homelab deployment, with upstream-compatible additions:
 
 Please see the upstream README.md for the viewer basics.
 
+## Branch layout
+
+- **`main`**: mirrors upstream (`abbbi/igcviewer`). Fetch upstream updates
+  into it (`git fetch upstream && git merge upstream/main`); never commit
+  fork changes here. (On the fork it was force-reset to `aacf1d6`, the
+  divergence point, when the fork branch was introduced.)
+- **`amos-fork-changes`**: `main` + all fork changes. **The default working
+  branch** — make changes here, and build release images from this branch.
+  To update: merge `main` (upstream) into it as desired.
+
 ## Build & Commands
 
-- Build binary: `go build ./cmd/server`
+- Build binary: `go build ./cmd/server` (run on `amos-fork-changes`)
 - Build with flugbuech integration: `go build -tags flugbuech ./cmd/server`
 - Run tests: `go test ./...` (also test with `-tags flugbuech`)
 - Vet: `go vet ./...` (run with and without the tag)
@@ -24,6 +34,8 @@ Please see the upstream README.md for the viewer basics.
 - Docker build: `docker buildx build --platform linux/amd64,linux/arm64 -t amosshapira/igcviewer:vX.Y -t amosshapira/igcviewer:latest --push .`
   - Multi-arch: the deployment target (picton) is linux/amd64; the dev Mac is arm64. Push BOTH.
   - The `FEATURE_FLUGBUECH=1` build arg (default: 1) controls the build tag.
+  - Build from the `amos-fork-changes` branch; bump the version tag and the
+    pin in the homelab compose file to deploy.
 
 ### Local run
 
