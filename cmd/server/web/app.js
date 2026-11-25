@@ -4,6 +4,7 @@ const playBtn = document.getElementById("playBtn");
 const baseViewSelect = document.getElementById("baseView");
 const playbackSpeedSelect = document.getElementById("playbackSpeed");
 const followCamSelect = document.getElementById("followCam");
+const marker3dToggle = document.getElementById("marker3d");
 const info = document.getElementById("info");
 const topbar = document.querySelector(".topbar");
 
@@ -45,6 +46,61 @@ const FOLLOW_CAM_PITCH_SOFT_LIMIT = 55;
 
 let latestPlaybackDetail = null;
 let syncingFollowCamera = false;
+
+const MARKER_3D_STORAGE_KEY = "flugbuech-marker-3d";
+
+// Replay marker preference: the 2D marker (a map-drawn dot at the flight's
+// ground position, default) or the 3D marker (deck.gl icon at flight
+// altitude). Persisted per browser.
+function isMarker3dEnabled() {
+  return marker3dToggle?.checked ?? false;
+}
+
+function initializeMarker3dToggle() {
+  if (!marker3dToggle) {
+    return;
+  }
+  marker3dToggle.checked = localStorage.getItem(MARKER_3D_STORAGE_KEY) === "1";
+  marker3dToggle.addEventListener("change", () => {
+    localStorage.setItem(MARKER_3D_STORAGE_KEY, marker3dToggle.checked ? "1" : "0");
+    rerenderTrackForCurrentState();
+  });
+}
+
+/**
+ * Update the map-drawn replay marker (a dot at the current fix's ground
+ * position) alongside the start/end markers.
+ */
+function updateCurrentMarker(detail) {
+  if (!detail?.position || !map.getSource("route-points")) {
+    return;
+  }
+  const start = currentPath[0];
+  const end = currentPath[currentPath.length - 1];
+  map.getSource("route-points").setData({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: { pointType: "start" },
+        geometry: { type: "Point", coordinates: start },
+      },
+      {
+        type: "Feature",
+        properties: { pointType: "end" },
+        geometry: { type: "Point", coordinates: end },
+      },
+      {
+        type: "Feature",
+        properties: { pointType: "current" },
+        geometry: {
+          type: "Point",
+          coordinates: [detail.position[0], detail.position[1]],
+        },
+      },
+    ],
+  });
+}
 
 const map = new maplibregl.Map({
   container: "map",
@@ -100,7 +156,7 @@ map.addControl(new maplibregl.NavigationControl({
 }), "top-right");
 
 map.on("load", async () => {
-  applyBaseView(baseViewSelect.value);
+  initializeMarker3dToggle();  applyBaseView(baseViewSelect.value);
 
   if (RENDER_STYLE === "deck") {
     // Experimental deck-owned terrain: maplibre stays flat and hidden, the
@@ -126,8 +182,8 @@ map.on("load", async () => {
       type: "circle",
       source: "route-points",
       paint: {
-        "circle-radius": ["case", ["==", ["get", "pointType"], "start"], 6, 4],
-        "circle-color": ["case", ["==", ["get", "pointType"], "start"], "#22c55e", "#ef4444"],
+        "circle-radius": ["case", ["==", ["get", "pointType"], "start"], 6, ["==", ["get", "pointType"], "current"], 8, 4],
+        "circle-color": ["case", ["==", ["get", "pointType"], "start"], "#22c55e", ["==", ["get", "pointType"], "current"], "#3b82f6", "#ef4444"],
         "circle-stroke-width": 1.5,
         "circle-stroke-color": "#ffffff",
       },
@@ -321,6 +377,14 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
   const trackStyle = getTrackStyleForZoom();
   const layers = [];
 
+  // In ground style the deck geometry shares maplibre's WebGL context but
+  // uses a different vertical datum than the rendered terrain (known
+  // deck.gl/maplibre limitation), which would occlude parts of the track
+  // and marker behind the terrain mesh. Depth testing is therefore off.
+  // In deck style the terrain belongs to deck.gl itself, so natural depth
+  // testing is consistent.
+  const depthTest = RENDER_STYLE === "deck";
+
   if (RENDER_STYLE === "deck") {
     // Experimental: the terrain mesh + imagery rendered by deck.gl itself,
     // so track and terrain share one projection.
@@ -348,13 +412,13 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
       capRounded: true,
       jointRounded: true,
       billboard: false,
-      parameters: { depthTest: true },
+      parameters: { depthTest },
     }),
   );
   layers.push(
     new deck.IconLayer({
       id: "flight-marker",
-      data: marker ? [marker] : [],
+      data: isMarker3dEnabled() && marker ? [marker] : [],
       pickable: false,
       getPosition: (d) => d.position,
       getAngle: (d) => d.angle || 0,
@@ -364,7 +428,7 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
       sizeMinPixels: 28,
       sizeMaxPixels: 64,
       billboard: false,
-      parameters: { depthTest: true },
+      parameters: { depthTest },
     }),
   );
 
@@ -580,6 +644,9 @@ function tickPlayback(ts) {
   playbackProgress = clamp(elapsed / getPlaybackDurationMs(), 0, 1);
   const detail = interpolatePathDetailed(currentPath, cumulativeDistances, totalDistanceM, playbackProgress);
   latestPlaybackDetail = detail;
+  if (!isMarker3dEnabled()) {
+    updateCurrentMarker(detail);
+  }
   renderDeckLayers(currentPath, markerFromDetail(detail), detail, true);
   updateReplayStats(computePlaybackStats(detail));
   if (isFollowCamEnabled()) {
