@@ -369,15 +369,15 @@ function rerenderTrackForCurrentState() {
 }
 
 function createGliderIcon() {
-  // Glider silhouette marker. Image source:
-  // https://freepngimg.com/png/75689-glider/icon (CC BY-NC 4.0, FreePNGimg),
-  // pre-rotated so the nose points up (bearing 0 = north).
+  // Top-down glider silhouette (drawn for this project), pre-oriented with
+  // the nose up (bearing 0 = north) so the replay's bearing rotation points
+  // the marker along the flight direction at any heading.
   return {
     id: "glider",
-    url: "/glider-marker.png",
-    width: 237,
-    height: 256,
-    anchorY: 128,
+    url: "/glider-topdown.png",
+    width: 192,
+    height: 192,
+    anchorY: 96,
   };
 }
 

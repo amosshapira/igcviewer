@@ -31,15 +31,22 @@ bumped to maplibre-gl 5.24.1 / deck.gl 9.4.2.
   self-"fixed" on reload because tiles were cached. `renderFlight` now
   re-clamps the track onto the terrain once the map is idle after the
   initial `fitBounds`.
+- **Replay marker orientation** (`0f68b02`): the freepngimg side-view
+  glider icon rotated by heading reads as an X-shaped cross at every
+  bearing (a side view cannot be rotated into a heading marker). The
+  `glider` marker is now a top-down glider silhouette drawn for this
+  project, which reads correctly at every heading. The side-view icon
+  remains in use as the favicon art source.
 
 ## Added
 
-- **Replay marker choice** (`793a8b8`): `?marker=paraglider|glider` query
-  parameter selects the replay marker (default: `glider`, a silhouette
-  icon; `paraglider` is the original SVG marker). Useful for non-paraglider
-  flights (e.g. gliders). Marker icon sources and licenses documented in
-  the README Credits section — note the glider icon is CC BY-NC 4.0, which
-  you may not want upstream.
+- **Replay marker choice** (`793a8b8`, `0f68b02`): `?marker=paraglider|glider` query
+  parameter selects the replay marker (default: `glider`, a top-down
+  silhouette drawn for this project — a side-view icon cannot be rotated
+  into a heading marker; `paraglider` is the original SVG marker). Marker
+  icon sources and licenses documented in the README Credits section —
+  note the freepngimg side-view icon (used for the favicon) is CC BY-NC
+  4.0, which you may not want upstream.
 - **Favicon** (`90b699a`, `793a8b8`): a GPS-tracking style favicon (map +
   pin + dashed track) as clean SVG (`favicon.svg`) with an ICO fallback —
   the page previously had none.

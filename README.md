@@ -43,9 +43,11 @@ authenticating with the token configured using `IGCVIEWER_TOKEN`.
 
 # Credits
 
-- Replay marker icon: [Glider icon by FreePNGimg](https://freepngimg.com/png/75689-glider/icon),
-  licensed [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
-  (non-commercial use with attribution).
+- Replay marker: the paraglider option is the original upstream SVG
+  marker; the glider option is a top-down silhouette drawn for this
+  project. The favicon (GPS-tracking icon: map, pin, dashed track) was
+  recreated in this project as a clean SVG — the visual concept is common
+  in navigation icon sets.
 
 # External resources
 
