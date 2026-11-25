@@ -21,6 +21,10 @@ const gliderIcon = createGliderIcon();
 
 const TERRAIN_EXAGGERATION = 1.0;
 const MIN_TERRAIN_CLEARANCE_M = 15;
+const TERRAIN_DEM_URL =
+  "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+const TERRAIN_TEXTURE_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const ALTITUDE_VISUAL_OFFSET_M = 10;
 const BASE_PLAYBACK_DURATION_MS = 60000;
 const TRACK_COLOR_CLIMB = [239, 68, 68, 245];
@@ -97,7 +101,16 @@ map.addControl(new maplibregl.NavigationControl({
 
 map.on("load", async () => {
   applyBaseView(baseViewSelect.value);
-  applyTerrain();
+
+  if (RENDER_STYLE === "deck") {
+    // Experimental deck-owned terrain: maplibre stays flat and hidden, the
+    // terrain mesh + imagery come from deck.gl's TerrainLayer.
+    map.setLayoutProperty("osm-base", "visibility", "none");
+    map.setLayoutProperty("satellite-base", "visibility", "none");
+    map.addLayer({ id: "bg", type: "background", paint: { "background-color": "#0b1220" } });
+  } else {
+    applyTerrain();
+  }
 
   deckOverlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
   map.addControl(deckOverlay);
@@ -107,17 +120,19 @@ map.on("load", async () => {
     data: { type: "FeatureCollection", features: [] },
   });
 
-  map.addLayer({
-    id: "route-points",
-    type: "circle",
-    source: "route-points",
-    paint: {
-      "circle-radius": ["case", ["==", ["get", "pointType"], "start"], 6, 4],
-      "circle-color": ["case", ["==", ["get", "pointType"], "start"], "#22c55e", "#ef4444"],
-      "circle-stroke-width": 1.5,
-      "circle-stroke-color": "#ffffff",
-    },
-  });
+  if (RENDER_STYLE !== "deck") {
+    map.addLayer({
+      id: "route-points",
+      type: "circle",
+      source: "route-points",
+      paint: {
+        "circle-radius": ["case", ["==", ["get", "pointType"], "start"], 6, 4],
+        "circle-color": ["case", ["==", ["get", "pointType"], "start"], "#22c55e", "#ef4444"],
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "#ffffff",
+      },
+    });
+  }
 
   info.textContent = "Choose an IGC file and click Upload.";
 
@@ -249,21 +264,23 @@ function renderFlight(flight) {
     angle: initialHeading(currentPath),
   }, startDetail, false);
 
-  map.getSource("route-points").setData({
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: { pointType: "start" },
-        geometry: { type: "Point", coordinates: start },
-      },
-      {
-        type: "Feature",
-        properties: { pointType: "end" },
-        geometry: { type: "Point", coordinates: end },
-      },
-    ],
-  });
+  if (RENDER_STYLE !== "deck") {
+    map.getSource("route-points").setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { pointType: "start" },
+          geometry: { type: "Point", coordinates: start },
+        },
+        {
+          type: "Feature",
+          properties: { pointType: "end" },
+          geometry: { type: "Point", coordinates: end },
+        },
+      ],
+    });
+  }
 
   map.fitBounds(
     [
@@ -302,38 +319,76 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
     ? buildVisibleSegments(currentSegments, detail)
     : currentSegments;
   const trackStyle = getTrackStyleForZoom();
-  deckOverlay.setProps({
-    layers: [
-      new deck.PathLayer({
-        id: "flight-path-3d",
-        data: visibleSegments,
-        getPath: (d) => d.path,
-        getColor: (d) => d.color,
-        widthUnits: "meters",
-        getWidth: TRACK_WIDTH_METERS,
-        widthScale: trackStyle.widthScale,
-        widthMinPixels: trackStyle.mainMinPixels,
-        capRounded: true,
-        jointRounded: true,
-        billboard: false,
-        parameters: { depthTest: true },
+  const layers = [];
+
+  if (RENDER_STYLE === "deck") {
+    // Experimental: the terrain mesh + imagery rendered by deck.gl itself,
+    // so track and terrain share one projection.
+    layers.push(
+      new deck.TerrainLayer({
+        id: "deck-terrain",
+        elevationData: TERRAIN_DEM_URL,
+        texture: TERRAIN_TEXTURE_URL,
+        elevationDecoder: { rScaler: 256, gScaler: 1, bScaler: 1 / 256, offset: -32768 },
+        wireframe: false,
       }),
-      new deck.IconLayer({
-        id: "flight-marker",
-        data: marker ? [marker] : [],
+    );
+  }
+
+  layers.push(
+    new deck.PathLayer({
+      id: "flight-path-3d",
+      data: visibleSegments,
+      getPath: (d) => d.path,
+      getColor: (d) => d.color,
+      widthUnits: "meters",
+      getWidth: TRACK_WIDTH_METERS,
+      widthScale: trackStyle.widthScale,
+      widthMinPixels: trackStyle.mainMinPixels,
+      capRounded: true,
+      jointRounded: true,
+      billboard: false,
+      parameters: { depthTest: true },
+    }),
+  );
+  layers.push(
+    new deck.IconLayer({
+      id: "flight-marker",
+      data: marker ? [marker] : [],
+      pickable: false,
+      getPosition: (d) => d.position,
+      getAngle: (d) => d.angle || 0,
+      getIcon: () => markerIcon,
+      sizeUnits: "meters",
+      getSize: 95,
+      sizeMinPixels: 28,
+      sizeMaxPixels: 64,
+      billboard: false,
+      parameters: { depthTest: true },
+    }),
+  );
+
+  if (RENDER_STYLE === "deck") {
+    // Start/end markers as deck geometry (the maplibre route-points layer
+    // is not loaded in this style and sits on the datum plane).
+    layers.push(
+      new deck.ScatterplotLayer({
+        id: "endpoints",
+        data: [currentPath[0], currentPath[currentPath.length - 1]],
         pickable: false,
-        getPosition: (d) => d.position,
-        getAngle: (d) => d.angle || 0,
-        getIcon: () => markerIcon,
-        sizeUnits: "meters",
-        getSize: 95,
-        sizeMinPixels: 28,
-        sizeMaxPixels: 64,
-        billboard: false,
-        parameters: { depthTest: true },
+        getPosition: (d) => d,
+        getRadius: 12,
+        radiusUnits: "pixels",
+        getFillColor: (d, { index }) => (index === 0 ? [34, 197, 94, 230] : [239, 68, 68, 230]),
+        stroked: true,
+        getLineColor: [255, 255, 255, 230],
+        lineWidthUnits: "pixels",
+        getLineWidth: 2,
       }),
-    ],
-  });
+    );
+  }
+
+  deckOverlay.setProps({ layers });
 }
 
 function getTrackStyleForZoom() {
@@ -407,6 +462,15 @@ const MARKER_PARAM = new URLSearchParams(window.location.search).get("marker");
 const markerIcon =
   MARKER_PARAM === "paraglider" ? createParagliderIcon() : createGliderIcon();
 
+// Rendering style: "ground" (default; maplibre terrain, track clamped onto
+// the terrain surface) or "deck" (experimental; maplibre terrain off, the
+// terrain mesh rendered by deck.gl itself, track at true altitude).
+const RENDER_STYLE_PARAM = new URLSearchParams(window.location.search).get(
+  "style",
+);
+const RENDER_STYLE =
+  RENDER_STYLE_PARAM === "deck" ? "deck" : "ground";
+
 function initialHeading(path) {
   if (!path || path.length < 2) {
     return 0;
@@ -431,6 +495,11 @@ function markerFromDetail(detail) {
 }
 
 function buildAdjustedPath(path) {
+  // deck style: true altitudes (the deck terrain and the track share one
+  // projection). ground style: clamp onto the terrain surface.
+  if (RENDER_STYLE === "deck") {
+    return path;
+  }
   return path.map((c) => {
     const [lon, lat, alt] = c;
     let adjustedAlt = Number(alt) + ALTITUDE_VISUAL_OFFSET_M;
@@ -444,6 +513,9 @@ function buildAdjustedPath(path) {
 }
 
 function applyTerrain() {
+  if (RENDER_STYLE === "deck") {
+    return;
+  }
   map.setTerrain(null);
   if (map.getSource("terrain-source")) {
     map.removeSource("terrain-source");
@@ -461,6 +533,10 @@ function applyTerrain() {
 }
 
 function applyBaseView(mode) {
+  if (RENDER_STYLE === "deck") {
+    // The deck terrain layer provides the imagery; maplibre layers stay hidden.
+    return;
+  }
   const showSatellite = mode === "satellite";
   map.setLayoutProperty("osm-base", "visibility", showSatellite ? "none" : "visible");
   map.setLayoutProperty("satellite-base", "visibility", showSatellite ? "visible" : "none");
