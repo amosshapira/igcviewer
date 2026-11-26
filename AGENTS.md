@@ -276,10 +276,3 @@ homelab deployment repo), newest first. **Append new sessions at the top.**
   picton via komodo, with the igcviewer v0.24 release binary
   (download-and-patch hack). The Caddy routes tisot.home /
   tisot-igc.home were in place.
-
-## Decisions
-
-- Choose between two approaches: ask (see the flugbuech AGENTS.md).
-- Security posture: homelab, LAN-only. The flugbuech integration trusts the
-  shared token holder for all flights (no per-user scoping); the token must
-  never appear in browser-facing URLs.
