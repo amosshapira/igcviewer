@@ -43,6 +43,12 @@ bumped to maplibre-gl 5.24.1 / deck.gl 9.4.2.
   marker is a map-drawn dot at the current fix's ground position — immune
   to the marker-vs-terrain datum mismatch; the 3D option shows the
   glider/paraglider icon at flight altitude.
+- **Speed display unit**: a "Speed unit" select in the top bar (persisted
+  in `localStorage` as `flugbuech-speed-unit`) switches the speed shown in
+  the replay stats and the profile panel between km/h and knots. Climb
+  rates stay in m/s.
+- **Replay seeking**: clicking/tapping the altitude profile seeks the
+  replay to the clicked time; the full track stays visible during replay.
 
 ## Fixed
 
