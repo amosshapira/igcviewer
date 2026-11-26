@@ -72,8 +72,8 @@ let syncingFollowCamera = false;
 
 const MARKER_3D_STORAGE_KEY = "flugbuech-marker-3d";
 
-// Replay marker preference: the 2D marker (a map-drawn dot at the flight's
-// ground position, default) or the 3D marker (deck.gl icon at flight
+// Replay marker preference: the 2D marker (a screen-space dot at the
+// revealed track's tip, default) or the 3D marker (deck.gl icon at flight
 // altitude). Persisted per browser.
 function isMarker3dEnabled() {
   return marker3dToggle?.checked ?? false;
@@ -87,41 +87,6 @@ function initializeMarker3dToggle() {
   marker3dToggle.addEventListener("change", () => {
     localStorage.setItem(MARKER_3D_STORAGE_KEY, marker3dToggle.checked ? "1" : "0");
     rerenderTrackForCurrentState();
-  });
-}
-
-/**
- * Update the map-drawn replay marker (a dot at the current fix's ground
- * position) alongside the start/end markers.
- */
-function updateCurrentMarker(detail) {
-  if (!detail?.position || !map.getSource("route-points")) {
-    return;
-  }
-  const start = currentPath[0];
-  const end = currentPath[currentPath.length - 1];
-  map.getSource("route-points").setData({
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: { pointType: "start" },
-        geometry: { type: "Point", coordinates: start },
-      },
-      {
-        type: "Feature",
-        properties: { pointType: "end" },
-        geometry: { type: "Point", coordinates: end },
-      },
-      {
-        type: "Feature",
-        properties: { pointType: "current" },
-        geometry: {
-          type: "Point",
-          coordinates: [detail.position[0], detail.position[1]],
-        },
-      },
-    ],
   });
 }
 
@@ -216,8 +181,8 @@ map.on("load", async () => {
       type: "circle",
       source: "route-points",
       paint: {
-        "circle-radius": ["case", ["==", ["get", "pointType"], "start"], 6, ["==", ["get", "pointType"], "current"], 8, 4],
-        "circle-color": ["case", ["==", ["get", "pointType"], "start"], "#22c55e", ["==", ["get", "pointType"], "current"], "#3b82f6", "#ef4444"],
+        "circle-radius": ["case", ["==", ["get", "pointType"], "start"], 6, 4],
+        "circle-color": ["case", ["==", ["get", "pointType"], "start"], "#22c55e", "#ef4444"],
         "circle-stroke-width": 1.5,
         "circle-stroke-color": "#ffffff",
       },
@@ -515,6 +480,28 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
     );
   }
 
+  // Current-position marker: a screen-space dot exactly at the revealed
+  // track's tip, so it always stays connected to the line regardless of the
+  // marker-vs-terrain datum difference. Used unless the 3D icon marker is
+  // enabled.
+  if (!isMarker3dEnabled() && detail?.position) {
+    layers.push(
+      new deck.ScatterplotLayer({
+        id: "current-marker",
+        data: [detail.position],
+        pickable: false,
+        getPosition: (d) => d,
+        getRadius: 8,
+        radiusUnits: "pixels",
+        getFillColor: [59, 130, 246, 255],
+        stroked: true,
+        getLineColor: [255, 255, 255, 255],
+        lineWidthUnits: "pixels",
+        getLineWidth: 2,
+      }),
+    );
+  }
+
   deckOverlay.setProps({ layers });
 }
 
@@ -707,9 +694,6 @@ function tickPlayback(ts) {
   playbackProgress = clamp(elapsed / getPlaybackDurationMs(), 0, 1);
   const detail = interpolatePathDetailed(currentPath, cumulativeDistances, totalDistanceM, playbackProgress);
   latestPlaybackDetail = detail;
-  if (!isMarker3dEnabled()) {
-    updateCurrentMarker(detail);
-  }
   renderDeckLayers(currentPath, markerFromDetail(detail), detail, true);
   const stats = computePlaybackStats(detail);
   updateReplayStats(stats);
