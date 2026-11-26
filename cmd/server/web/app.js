@@ -5,6 +5,7 @@ const baseViewSelect = document.getElementById("baseView");
 const playbackSpeedSelect = document.getElementById("playbackSpeed");
 const followCamSelect = document.getElementById("followCam");
 const marker3dToggle = document.getElementById("marker3d");
+const speedUnitSelect = document.getElementById("speedUnit");
 const info = document.getElementById("info");
 const topbar = document.querySelector(".topbar");
 const profilePanel = document.getElementById("profilePanel");
@@ -155,7 +156,8 @@ map.addControl(new maplibregl.NavigationControl({
 }), "top-right");
 
 map.on("load", async () => {
-  initializeMarker3dToggle();  applyBaseView(baseViewSelect.value);
+  initializeMarker3dToggle();
+  initializeSpeedUnit();  applyBaseView(baseViewSelect.value);
 
   if (RENDER_STYLE === "deck") {
     // Experimental deck-owned terrain: maplibre stays flat and hidden, the
@@ -1196,6 +1198,48 @@ function drawProfileChart() {
   ctx.stroke();
 }
 
+const SPEED_UNIT_STORAGE_KEY = "flugbuech-speed-unit";
+
+// Speed display unit: "kmh" (default) or "kn" (knots), persisted per
+// browser. Applies to the replay stats and the profile panel; climb rates
+// stay in m/s.
+function speedUnit() {
+  return speedUnitSelect?.value === "kn" ? "kn" : "kmh";
+}
+
+function formatSpeedKmh(speedKmh) {
+  return speedUnit() === "kn"
+    ? `${(speedKmh / 1.852).toFixed(1)} kn`
+    : `${speedKmh.toFixed(1)} km/h`;
+}
+
+function initializeSpeedUnit() {
+  if (!speedUnitSelect) {
+    return;
+  }
+  try {
+    const stored = localStorage.getItem(SPEED_UNIT_STORAGE_KEY);
+    if (stored === "kn" || stored === "kmh") {
+      speedUnitSelect.value = stored;
+    }
+  } catch {
+    // localStorage may be unavailable; the default stays in effect.
+  }
+  speedUnitSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem(SPEED_UNIT_STORAGE_KEY, speedUnitSelect.value);
+    } catch {
+      // Same as above: the select still applies for this session.
+    }
+    const detail = latestPlaybackDetail;
+    if (detail) {
+      const stats = computePlaybackStats(detail);
+      updateReplayStats(stats);
+      updateProfileReplay(detail, stats);
+    }
+  });
+}
+
 // Replay time of the marker line, interpolated like computePlaybackStats.
 function currentProfileTimeMs() {
   if (!currentSamples.length) {
@@ -1315,7 +1359,7 @@ function updateProfileReplay(detail, stats) {
   profileAltMslEl.textContent = altMsl === null ? "–" : `${Math.round(altMsl)} m`;
   profileAglEl.textContent = altMsl === null || groundM === null ? "–" : `${Math.round(altMsl - groundM)} m`;
   profileClimbEl.textContent = stats ? formatClimbRate(stats.climbRateMs) : "–";
-  profileSpeedEl.textContent = stats ? `${stats.speedKmh.toFixed(1)} km/h` : "–";
+  profileSpeedEl.textContent = stats ? formatSpeedKmh(stats.speedKmh) : "–";
 
   drawProfileMarker(currentProfileTimeMs());
 }
@@ -1372,7 +1416,7 @@ function updateReplayStats(stats) {
     return;
   }
 
-  speedEl.textContent = `${stats.speedKmh.toFixed(1)} km/h`;
+  speedEl.textContent = formatSpeedKmh(stats.speedKmh);
   climbEl.textContent = formatClimbRate(stats.climbRateMs);
   progressEl.textContent = `${(stats.progress * 100).toFixed(1)}%`;
   elapsedEl.textContent = formatDuration(stats.elapsedSec);
