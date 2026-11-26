@@ -134,3 +134,152 @@ only matters locally.
 - Security posture: homelab, LAN-only. The flugbuech integration trusts the
   shared token holder for all flights (no per-user scoping); the token must
   never appear in browser-facing URLs.
+
+## Work log (ongoing — append every work session)
+
+Ongoing task: this section summarises the prompts given and the actions
+taken on this project (including the related flugbuech fork and the
+homelab deployment repo), newest first. **Append new sessions at the top.**
+
+### 2026-11-27 — GLB marker task recorded
+
+- Prompt: "about the icon — would a GLB file be more useful? I found a
+  free one to use in innerscene.com (sailplane glider 5d42002f)". Later:
+  "yes. later. Also remember to give credit to this link in the
+  documentation, despite the CC0 not requiring it."
+- Action: feasibility verified (deck.SimpleMeshLayer available in the
+  bundled deck.gl 9.4.2; GLB downloads as valid glTF v2, 6.8 MB, CC0).
+  Task recorded in the flugbuech TODO file
+  (`amos-flugbuech/TODO-igcviewer-view-track.md`) with implementation
+  notes (orientation math, scale tuning, nose-axis alignment, the
+  "assembly" caveat) and the credit requirement for the README. Not yet
+  implemented.
+
+### 2026-11-26 — speed unit, profile click-to-seek, marker fix shipped
+
+- Prompt: "the 2d blue circle is in the right position. the 3d marker
+  still picks the wrong direction. leave it for now. where is the
+  altitude graph?" → answered (Profile toggle); 3D marker orientation
+  noted as an open item.
+- Prompt: "Once I click 'play', is there a way to see the entire track
+  without reloading the page?" → added: the full track stays visible
+  during replay; then "I want a way to see the entire track as if I
+  didn't press 'play' at all. Also I want to pick the location of the
+  marker on the full track by clicking on the altitude profile." →
+  removed the reveal/dimmed-underlay mechanic and added profile
+  click-to-seek (works playing and paused). Shipped as v1.9.
+- Prompt: "the 2d blue circle ... floats away from the end of the line" →
+  the current-position marker now renders as deck geometry at the
+  interpolated track position (attached to the line's tip). Shipped as
+  v1.8.
+- Prompt: "give an option to change speed to knots" → "Speed unit"
+  topbar select (km/h / kn, persisted). Shipped as v1.10.
+- Prompt: "maintain an AGENTS.md file summarising all the prompts and
+  actions taken" → this section.
+
+### 2026-11-26 (early) — altitude panel, render styles, marker/depth fixes shipped
+
+- Prompt: "the 2d blue circle ... floats away..." context; user chose
+  "make it an option to choose between [terrain-hugging] and
+  [deck-owned terrain]" and asked for the work on a dedicated branch.
+- Actions: `rendering-style-option` branch created; deck-vs-maplibre
+  vertical-datum mismatch identified as the root cause of
+  occlusion/floating (depthTest disabled in ground style — interleaved
+  mode depth-composites deck geometry against the terrain mesh);
+  2D-marker default + 3D Marker toggle implemented; altitude panel
+  merged from the `altitude-panel` branch (background agent: WeGlide-
+  style chart, thermal markers, live marker line, stats). Shipped as
+  igcviewer v1.7 (PR #32); the homelab deploy was entangled with the
+  user's parallel dawarich work on main (resolved via rebase + PR #36
+  for the api v1.6 bump).
+- Prompt: "would a simple 2D icon avoid the issue?" → answered; led to
+  the 2D-marker default.
+
+### 2026-11-26 (start) — render-style option requested
+
+- Prompt: "make it an option to choose between 1 and 3" (terrain-hugging
+  vs deck-owned terrain) + "make the changes in a new branch" +
+  "move commits done today to the new dedicated branch" → branch
+  restructure clarified: today's igcviewer commits were already on
+  `amos-fork-changes`; a feature branch was created off it.
+- Prompt: "another task — add an optional bottom panel showing the
+  altitude AMSL and profile of the ground under the track like
+  weglide.org does" (reference screenshot provided) → implemented by a
+  background agent on the `altitude-panel` branch (see above).
+
+### 2026-11-25 — preferences, favicons, NIL fix shipped
+
+- Prompts: "add optional column to show 'P2' pilot in the flight list
+  page"; "use the ICO file from freepngimg.com (glider icon)"; "favicon
+  works now. create a CHANGELOG.md ... audience is the upstream author";
+  "remove the done items from the TODO file"; "the generated glider icon
+  seems reversed when turning"; "another example — flight 84 flying
+  straight shows weird orientation"; "this worked. give an option to
+  change speed to knots".
+- Actions: P2 column (auto-optional); glider favicon (v1.4) + flugbuech
+  favicon (v1.4 after user chose the glider silhouette); CHANGELOGs for
+  both repos; TODO trimmed; the four-bearing marker test; top-down
+  marker (v1.6); speed unit option (v1.10 — see 2026-11-26).
+
+### 2026-11-24 — integration debugging day
+
+- Prompts: "the igcviewer fetched the file but plays the track in the
+  wrong location"; flight 109 described (2026-11-18, VH-GOB LS-4a);
+  "right area, offset"; "floats over the map, doesn't move with it;
+  start/finish disconnected"; "a reload fixes it"; "the other copy
+  (igc.home) renders correctly"; "the repo used to have hooks to
+  auto-deploy"; "I cleaned up space. continue"; "how to hard refresh";
+  "favicon works now" context; "make the changes compile time flags";
+  "instead of main, make the new changes on branch amos-fork-changes";
+  "which repo do you refer to?".
+- Actions: found the deploy automation (GitHub Actions deploy.yml →
+  komodo listeners) and the Docker Hub private-repo issue; root causes
+  for the rendering problems (HFDTEDATE:ddmmyy parsing bug; terrain
+  timing); fixed + shipped v1.5–v1.7; discovered the Mac disk was full
+  (100%) which had made Docker's VM read-only mid-build; branch layout
+  restructure (main = upstream mirror, amos-fork-changes = fork work);
+  AGENTS.md + CHANGELOG.md created; komodo/deploy verification.
+
+### 2026-11-23 — session start: View track integration
+
+- Prompt: "about the tisot work done in previous session — there is an
+  igcviewer container in the same stack. Add a 'view track' button to
+  the flugbuech/tisot container to open the igcviewer with a link which
+  tells igcviewer to access the uploaded igc file locally... if the
+  code has to change, fork it, clone it locally and make the changes
+  there."
+- Actions: forked abbbi/igcviewer → amosshapira/igcviewer (push-based:
+  empty repo + push, after the API fork failed with the fine-grained
+  PAT); user's design decisions: token-authenticated server-side fetch
+  (flugbuech stores IGC in postgres, so the "file on disk" idea became
+  a shared token), Docker Hub image deployment; implemented the
+  `flugbuech` build tag fetch endpoint + IGCVIEWER_ADDR + Dockerfile
+  (v1.0–v1.3 lineage); flugbuech `igc_view` redirect route + token
+  download + View track buttons; deploy pipeline established
+  (komodo + versioned image tags); deployed and verified end-to-end.
+- Prompts during deploy: "pull access denied" (Docker Hub private repo);
+  "I changed my default privacy to public"; "all stack env vars
+  disappeared after the last deploy" (komodo env recovery — values
+  recovered from the running containers); "the new button opens the
+  igcviewer alright, but ... no flugbuech upstream configured"; "error
+  when trying to pull new images: no matching manifest for linux/amd64"
+  (arm64-only image mistake → multi-arch rebuild); "still waiting?";
+  "could it be related to full local macos disk?"; "this worked" (after
+  the deploy).
+
+### 2026-11-20 — tisot stack origin (previous session)
+
+- The flugbuech fork (amos-flugbuech) was created with the sailplane/
+  gliding fields, glider registration column + IGC glider auto-fill,
+  IGC back-fill endpoint + My Flights button, and configurable display
+  units; the tisot stack (api + web + igcviewer + db) was deployed on
+  picton via komodo, with the igcviewer v0.24 release binary
+  (download-and-patch hack). The Caddy routes tisot.home /
+  tisot-igc.home were in place.
+
+## Decisions
+
+- Choose between two approaches: ask (see the flugbuech AGENTS.md).
+- Security posture: homelab, LAN-only. The flugbuech integration trusts the
+  shared token holder for all flights (no per-user scoping); the token must
+  never appear in browser-facing URLs.
