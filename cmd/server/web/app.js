@@ -340,7 +340,7 @@ function renderFlight(flight) {
   renderDeckLayers(currentPath, {
     position: currentPath[0],
     angle: initialHeading(currentPath),
-  }, startDetail, false);
+  }, startDetail);
 
   if (RENDER_STYLE !== "deck") {
     map.getSource("route-points").setData({
@@ -398,10 +398,7 @@ function reclampTrackOnTerrain(coords) {
   rerenderTrackForCurrentState();
 }
 
-function renderDeckLayers(path, marker, detail, revealTrack) {
-  const visibleSegments = revealTrack
-    ? buildVisibleSegments(currentSegments, detail)
-    : currentSegments;
+function renderDeckLayers(path, marker, detail) {
   const trackStyle = getTrackStyleForZoom();
   const layers = [];
 
@@ -427,10 +424,12 @@ function renderDeckLayers(path, marker, detail, revealTrack) {
     );
   }
 
+  // The full track is always visible, also during replay: the moving
+  // marker (2D dot or 3D icon) shows the replay position along it.
   layers.push(
     new deck.PathLayer({
       id: "flight-path-3d",
-      data: visibleSegments,
+      data: currentSegments,
       getPath: (d) => d.path,
       getColor: (d) => d.color,
       widthUnits: "meters",
@@ -533,8 +532,7 @@ function rerenderTrackForCurrentState() {
   }
 
   const detail = latestPlaybackDetail || { position: currentPath[0], segIndex: 1, segT: 0 };
-  const revealTrack = isPlaying || (playbackProgress > 0 && playbackProgress < 1);
-  renderDeckLayers(currentPath, markerFromDetail(detail), detail, revealTrack);
+  renderDeckLayers(currentPath, markerFromDetail(detail), detail);
 }
 
 function createGliderIcon() {
@@ -694,7 +692,7 @@ function tickPlayback(ts) {
   playbackProgress = clamp(elapsed / getPlaybackDurationMs(), 0, 1);
   const detail = interpolatePathDetailed(currentPath, cumulativeDistances, totalDistanceM, playbackProgress);
   latestPlaybackDetail = detail;
-  renderDeckLayers(currentPath, markerFromDetail(detail), detail, true);
+  renderDeckLayers(currentPath, markerFromDetail(detail), detail);
   const stats = computePlaybackStats(detail);
   updateReplayStats(stats);
   updateProfileReplay(detail, stats);
@@ -747,30 +745,6 @@ function buildRouteSegments(path, samples) {
         ? TRACK_COLOR_CLIMB
         : TRACK_COLOR_DEFAULT,
   }));
-}
-
-function buildVisibleSegments(segments, detail) {
-  if (!Array.isArray(segments) || segments.length === 0) {
-    return [];
-  }
-  if (!detail || !detail.position) {
-    return [];
-  }
-
-  const fullCount = Math.max(0, Math.min(detail.segIndex - 1, segments.length));
-  const visible = segments.slice(0, fullCount);
-
-  if (detail.segIndex >= 1 && detail.segIndex <= segments.length) {
-    const active = segments[detail.segIndex - 1];
-    const start = active.path[0];
-    visible.push({
-      path: [start, detail.position],
-      color: active.color,
-      climbRateMs: active.climbRateMs,
-    });
-  }
-
-  return visible;
 }
 
 function quantile(values, q) {
@@ -1234,6 +1208,68 @@ function currentProfileTimeMs() {
   const prev = currentSamples[detail.segIndex - 1];
   const next = currentSamples[detail.segIndex];
   return prev.timeMs + (next.timeMs - prev.timeMs) * detail.segT;
+}
+
+// Click on the altitude profile: seek the replay to the clicked time. Works
+// while playing (playback continues from there) and while paused.
+profileCanvas.addEventListener("click", (event) => {
+  if (!profileChartGeom || !profileVisible || currentSamples.length < 2) {
+    return;
+  }
+  const rect = profileCanvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const { left, plotW, t0, t1 } = profileChartGeom;
+  const frac = clamp((x - left) / plotW, 0, 1);
+  const tMs = t0 + frac * (t1 - t0);
+
+  // Sample whose time is closest to the clicked position (binary search).
+  let lo = 0;
+  let hi = currentSamples.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (currentSamples[mid].timeMs < tMs) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+
+  const progress =
+    totalDistanceM > 0
+      ? clamp(cumulativeDistances[lo] / totalDistanceM, 0, 1)
+      : 0;
+  seekToProgress(progress);
+});
+
+/**
+ * Jump the replay to the given distance progress (0..1). While playing,
+ * playback continues from the new position; while paused, the view and the
+ * profile marker line move there.
+ */
+function seekToProgress(progress) {
+  if (!currentPath.length || !totalDistanceM) {
+    return;
+  }
+  playbackProgress = clamp(progress, 0, 1);
+  const detail = interpolatePathDetailed(
+    currentPath,
+    cumulativeDistances,
+    totalDistanceM,
+    playbackProgress,
+  );
+  latestPlaybackDetail = detail;
+
+  if (isPlaying) {
+    // Keep playing from the new position.
+    playbackStartTs = performance.now() - playbackProgress * getPlaybackDurationMs();
+  } else if (playBtn) {
+    playBtn.textContent = playbackProgress >= 1 ? "Replay" : "Play";
+  }
+
+  renderDeckLayers(currentPath, markerFromDetail(detail), detail);
+  const stats = computePlaybackStats(detail);
+  updateReplayStats(stats);
+  updateProfileReplay(detail, stats);
 }
 
 function drawProfileMarker(tMs) {
