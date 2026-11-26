@@ -154,6 +154,12 @@ homelab deployment repo), newest first. **Append new sessions at the top.**
   notes (orientation math, scale tuning, nose-axis alignment, the
   "assembly" caveat) and the credit requirement for the README. Not yet
   implemented.
+- Prompt: "the docker hub vulnerability scan found a few critical
+  security bugs ... Add a task to address them later."
+- Action: task recorded in the TODO file — the findings come from the
+  base images / Go stdlib, not the app code; fix = rebuild from fresh
+  bases + toolchain updates, re-scan, and consider scheduled rebuilds.
+  Also flagged the tisot image for the same check.
 
 ### 2026-11-26 — speed unit, profile click-to-seek, marker fix shipped
 
