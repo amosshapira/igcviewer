@@ -1,5 +1,5 @@
 # Build static binary
-FROM docker.io/golang:1.24-alpine AS build
+FROM docker.io/golang:1.26-alpine AS build
 
 # FEATURE_FLUGBUECH=1 compiles in the flugbuech flight fetching integration
 # (see cmd/server/flights_flugbuech.go)
@@ -11,9 +11,12 @@ COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build $(if [ "${FEATURE_FLUGBUECH}" = "1" ]; then printf -- "-tags flugbuech"; fi) -trimpath -o /igcviewer ./cmd/server
 
-# Runtime image
-FROM docker.io/debian:13-slim
-
+# Runtime image: alpine keeps the image small and debuggable; CA
+# certificates are needed when IGCVIEWER_UPSTREAM is an HTTPS URL. The
+# upgrade pulls security fixes (e.g. zlib) that the base tag may predate.
+FROM docker.io/alpine:3
+RUN apk upgrade --no-cache \
+ && apk add --no-cache ca-certificates
 COPY --from=build /igcviewer /app/igcviewer
 
 WORKDIR /app

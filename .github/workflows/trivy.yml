@@ -1,0 +1,22 @@
+name: Trivy image scan
+
+on:
+  push:
+    branches: [main, amos-fork-changes]
+  schedule:
+    - cron: "0 4 * * 1"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t igcviewer:scan .
+      - name: Scan for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: igcviewer:scan
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          format: table
