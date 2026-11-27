@@ -64,7 +64,7 @@ type trackSample struct {
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/flight", handleFlight)
-	mux.Handle("/", staticHandler())
+	mux.Handle("/", noCache(staticHandler()))
 
 	addr := os.Getenv("IGCVIEWER_ADDR")
 	if addr == "" {
@@ -124,6 +124,18 @@ func staticHandler() http.Handler {
 		panic(err)
 	}
 	return http.FileServer(http.FS(sub))
+}
+
+// noCache forces browsers to revalidate the embedded frontend assets before
+// using cached copies. Without it, browsers may serve stale scripts with
+// heuristic caching after an upgrade, breaking the page against the new
+// server data (observed with the reuse-viewer-tab flow). Revalidation is
+// cheap: unchanged assets answer 304.
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func buildResponse(name string, flight *igc.Flight) (*flightResponse, error) {
