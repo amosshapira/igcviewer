@@ -18,6 +18,18 @@ bumped to maplibre-gl 5.24.1 / deck.gl 9.4.2.
 
 ## Added
 
+- **3D sailplane replay marker**: the "glider" marker (the default; the
+  `?marker=` parameter now only selects between the 3D glider and the
+  paraglider) is a textured 3D sailplane GLB model rendered with deck.gl's
+  `SimpleMeshLayer` instead of the flat top-down PNG icon, so it yaws with
+  the track bearing, pitches with the climb angle and banks slightly in
+  turns. Shown with the existing "3D Marker" toggle (off = the 2D
+  screen-space dot as before). The model is
+  [Innerscene's "Sailplane glider"](https://www.innerscene.com/tools/library/3d-parts/sailplane-glider-5d42002f)
+  (CC0-1.0), embedded as `web/sailplane.glb`; the bundled deck.gl build
+  has no glTF loader, so the GLB is parsed in `app.js` into plain
+  SimpleMeshLayer geometry (one mesh + texture per material). The unused
+  `glider-topdown.png` is removed.
 - **Optional altitude + ground profile panel** (WeGlide-style): a
   "Profile" toggle in the top bar (persisted in
   `localStorage` as `flugbuech-profile-panel`, default hidden) shows a

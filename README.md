@@ -44,10 +44,12 @@ authenticating with the token configured using `IGCVIEWER_TOKEN`.
 # Credits
 
 - Replay marker: the paraglider option is the original upstream SVG
-  marker; the glider option is a top-down silhouette drawn for this
-  project. The favicon (GPS-tracking icon: map, pin, dashed track) was
-  recreated in this project as a clean SVG — the visual concept is common
-  in navigation icon sets.
+  marker; the glider option is a 3D sailplane model,
+  ["Sailplane glider"](https://www.innerscene.com/tools/library/3d-parts/sailplane-glider-5d42002f)
+  by [Innerscene](https://www.innerscene.com), CC0-1.0 public domain
+  (credit given voluntarily). The favicon (GPS-tracking icon: map, pin,
+  dashed track) was recreated in this project as a clean SVG — the visual
+  concept is common in navigation icon sets.
 
 # External resources
 

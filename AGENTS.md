@@ -141,6 +141,51 @@ Ongoing task: this section summarises the prompts given and the actions
 taken on this project (including the related flugbuech fork and the
 homelab deployment repo), newest first. **Append new sessions at the top.**
 
+### 2026-11-27 (later) — 3D sailplane GLB replay marker implemented (`glb-marker` branch)
+
+- Prompt (from a parent session): implement the queued GLB marker task in
+  a worktree of `amos-fork-changes` on a new `glb-marker` branch: replace
+  the flat top-down PNG glider marker with the Innerscene "Sailplane
+  glider" GLB via deck.gl `SimpleMeshLayer`, verify with the Playwright
+  harness (four cardinal bearings + replay), credit the model in the
+  README, push the branch.
+- Actions:
+  - Downloaded the CC0 model to `cmd/server/web/sailplane.glb`
+    (6.8 MB, valid glTF v2; 45 untransformed single-primitive meshes,
+    10 materials each with its own embedded tiling texture, Y-up, nose
+    along +X, ~15 m wingspan / 6.8 m length).
+  - **The bundled deck.gl 9.4.2 UMD registers no glTF loader** (only
+    JSON/Image), so `mesh: "/sailplane.glb"` fails with "No valid loader
+    found" — `app.js` now parses the GLB itself (`loadSailplaneMesh`):
+    container chunks → accessors (packed fast path + strided fallback) →
+    one merged geometry + blob-URL texture per material, with each
+    material's `KHR_texture_transform` tiling baked into the texels. One
+    `SimpleMeshLayer` per material part shares the marker position and
+    orientation; parsed once, marker appears when ready.
+  - Orientation (derived from deck.gl's euler `R = Rz(yaw)·Ry(pitch)·
+    Rx(roll)` in the bundle and verified with the four-bearing harness at
+    0/90/180/270 — all four noses correct, wings perpendicular):
+    `[pitch, 90 - bearing, 90 + bank]`; deck-positive pitch = nose down,
+    so pitch = −climb angle (atan2 of windowed vertical/horizontal speed,
+    8 s window); roll 90 converts the Y-up GLB to deck's Z-up, + bank =
+    turn rate (windowed heading change/s) × gain, clamped ±35°
+    (positive = right bank — verified with a nadir underside-visibility
+    test at ±60°).
+  - Scale: `sizeScale 20` (~300 m wingspan) reads like the old 28–64 px
+    icon at zoom 13–15 (verified top-down + perspective screenshots).
+  - `?marker=` kept: `glider` (default) = the GLB mesh, `paraglider` =
+    the SVG icon layer (unchanged); the mesh shows only with the 3D
+    Marker toggle on (else the 2D dot, unchanged); depthTest pattern
+    unchanged (false in ground style, true in deck style).
+    `glider-topdown.png` retired (was only used by app.js) and deleted.
+  - Verified: flight 109 replay (launch climb pitch, thermal bank, zooms
+    13–15, follow-cam-style views), flight 84 (different aircraft),
+    deck style, paraglider, 2D dot fallback; no console errors; 
+    `node --check`, `go test ./...` clean. Port 8095 was occupied
+    (`igcviewer-panel`), the test container used 8097.
+  - README Credits + CHANGELOG entries added (Innerscene sailplane, CC0,
+    credited voluntarily).
+
 ### 2026-11-27 — GLB marker task recorded
 
 - Prompt: "about the icon — would a GLB file be more useful? I found a

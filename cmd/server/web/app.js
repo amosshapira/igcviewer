@@ -26,7 +26,6 @@ let animationFrameId = null;
 let isPlaying = false;
 let playbackProgress = 0;
 let playbackStartTs = 0;
-const gliderIcon = createGliderIcon();
 
 const TERRAIN_EXAGGERATION = 1.0;
 const MIN_TERRAIN_CLEARANCE_M = 15;
@@ -51,6 +50,20 @@ const TRACK_MAIN_MIN_PIXELS_NEAR = 2;
 const TRACK_MAIN_MIN_PIXELS_VERY_NEAR = 1.5;
 const FOLLOW_CAM_MAX_ZOOM = 16;
 const FOLLOW_CAM_PITCH_SOFT_LIMIT = 55;
+
+// 3D sailplane replay marker (deck.gl SimpleMeshLayer, GLB model). The
+// model is Y-up with the nose along +X at real-world scale (~15 m wingspan;
+// deck.gl's euler order means yaw = 90 - bearing points the nose along the
+// compass bearing, and roll carries a constant +90 to convert Y-up to
+// deck's Z-up). MESH_MARKER_SIZE_SCALE exaggerates the real-world size so
+// the marker reads like the previous 28-64 px icon at typical zooms; the
+// bank gain maps the turn rate (deg/s) to a roll angle in turns.
+const MESH_MARKER_SIZE_SCALE = 20;
+const MESH_MARKER_PITCH_SIGN = -1; // deck positive pitch = nose down
+const MESH_MARKER_BANK_BASE_DEG = 90; // Y-up GLB -> deck Z-up
+const MESH_MARKER_BANK_GAIN = 2.0;
+const MESH_MARKER_BANK_MAX_DEG = 35;
+const MESH_MARKER_WINDOW_MS = 8000;
 
 // Altitude + ground profile panel (optional, WeGlide-style bottom chart).
 const PROFILE_PANEL_STORAGE_KEY = "flugbuech-profile-panel";
@@ -339,10 +352,7 @@ function renderFlight(flight) {
   playBtn.textContent = "Play";
   const startDetail = { position: currentPath[0], segIndex: 1, segT: 0 };
   latestPlaybackDetail = startDetail;
-  renderDeckLayers(currentPath, {
-    position: currentPath[0],
-    angle: initialHeading(currentPath),
-  }, startDetail);
+  renderDeckLayers(currentPath, markerFromDetail(startDetail), startDetail);
 
   if (RENDER_STYLE !== "deck") {
     map.getSource("route-points").setData({
@@ -444,22 +454,35 @@ function renderDeckLayers(path, marker, detail) {
       parameters: { depthTest },
     }),
   );
-  layers.push(
-    new deck.IconLayer({
-      id: "flight-marker",
-      data: isMarker3dEnabled() && marker ? [marker] : [],
-      pickable: false,
-      getPosition: (d) => d.position,
-      getAngle: (d) => d.angle || 0,
-      getIcon: () => markerIcon,
-      sizeUnits: "meters",
-      getSize: 95,
-      sizeMinPixels: 28,
-      sizeMaxPixels: 64,
-      billboard: false,
-      parameters: { depthTest },
-    }),
-  );
+  if (USE_MESH_MARKER) {
+    // The glider marker: a 3D sailplane GLB mesh oriented with the flight
+    // (yaw = bearing, pitch = climb angle, roll = bank), shown under the
+    // same conditions as the flat icon: only with the 3D marker toggle
+    // enabled; otherwise the 2D screen-space dot below is used.
+    if (isMarker3dEnabled() && marker) {
+      const meshLayers = getMarkerMeshLayers(marker, depthTest);
+      if (meshLayers) {
+        layers.push(...meshLayers);
+      }
+    }
+  } else {
+    layers.push(
+      new deck.IconLayer({
+        id: "flight-marker",
+        data: isMarker3dEnabled() && marker ? [marker] : [],
+        pickable: false,
+        getPosition: (d) => d.position,
+        getAngle: (d) => d.angle || 0,
+        getIcon: () => markerIcon,
+        sizeUnits: "meters",
+        getSize: 95,
+        sizeMinPixels: 28,
+        sizeMaxPixels: 64,
+        billboard: false,
+        parameters: { depthTest },
+      }),
+    );
+  }
 
   if (RENDER_STYLE === "deck") {
     // Start/end markers as deck geometry (the maplibre route-points layer
@@ -537,19 +560,6 @@ function rerenderTrackForCurrentState() {
   renderDeckLayers(currentPath, markerFromDetail(detail), detail);
 }
 
-function createGliderIcon() {
-  // Top-down glider silhouette (drawn for this project), pre-oriented with
-  // the nose up (bearing 0 = north) so the replay's bearing rotation points
-  // the marker along the flight direction at any heading.
-  return {
-    id: "glider",
-    url: "/glider-topdown.png",
-    width: 192,
-    height: 192,
-    anchorY: 96,
-  };
-}
-
 function createParagliderIcon() {
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
@@ -569,12 +579,235 @@ function createParagliderIcon() {
   };
 }
 
-// Replay marker selection: "glider" (default) or "paraglider", chosen via
-// the "marker" query parameter (used by flugbuech deep links; see the
-// per-user track marker preference).
+// Replay marker selection: "glider" (default; the 3D sailplane GLB mesh)
+// or "paraglider" (the flat SVG icon), chosen via the "marker" query
+// parameter (used by flugbuech deep links; see the per-user track marker
+// preference).
 const MARKER_PARAM = new URLSearchParams(window.location.search).get("marker");
-const markerIcon =
-  MARKER_PARAM === "paraglider" ? createParagliderIcon() : createGliderIcon();
+const USE_MESH_MARKER = MARKER_PARAM !== "paraglider";
+const markerIcon = USE_MESH_MARKER ? null : createParagliderIcon();
+
+// The bundled deck.gl build registers no glTF loader, so the sailplane GLB
+// is parsed here into the plain geometry objects SimpleMeshLayer accepts.
+// The model (Innerscene "Sailplane glider", CC0) is one unanimated scene of
+// 45 single-primitive meshes whose ten materials each sample their own
+// embedded tiling texture, so one geometry + texture pair is produced per
+// material group. Parsed once, then reused by every marker layer.
+const GLB_COMPONENT_ARRAYS = {
+  5120: Int8Array,
+  5121: Uint8Array,
+  5122: Int16Array,
+  5123: Uint16Array,
+  5125: Uint32Array,
+  5126: Float32Array,
+};
+const GLB_COMPONENT_READERS = {
+  5120: (v, at) => v.getInt8(at),
+  5121: (v, at) => v.getUint8(at),
+  5122: (v, at) => v.getInt16(at, true),
+  5123: (v, at) => v.getUint16(at, true),
+  5125: (v, at) => v.getUint32(at, true),
+  5126: (v, at) => v.getFloat32(at, true),
+};
+const GLB_COMPONENT_COUNTS = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+const GLB_CHUNK_JSON = 0x4e4f534a; // "JSON"
+const GLB_CHUNK_BIN = 0x004e4942; // "BIN\0"
+
+let markerMeshPromise = null;
+let markerMeshParts = null;
+let markerMeshFailed = false;
+
+// Starts parsing /sailplane.glb once; re-renders when it is ready so the
+// marker appears as soon as loading finishes.
+function ensureMarkerMeshLoaded() {
+  if (markerMeshPromise || markerMeshFailed) {
+    return;
+  }
+  markerMeshPromise = loadSailplaneMesh("/sailplane.glb")
+    .then((parts) => {
+      markerMeshParts = parts;
+      rerenderTrackForCurrentState();
+    })
+    .catch((err) => {
+      markerMeshFailed = true;
+      console.error("Failed to load the sailplane marker mesh:", err);
+    });
+}
+
+// One SimpleMeshLayer per parsed part, all sharing the marker position and
+// orientation. The layer color is white so the texture shows through
+// (SimpleMeshLayer multiplies the instance color into the texture sample).
+function getMarkerMeshLayers(marker, depthTest) {
+  if (!markerMeshParts) {
+    ensureMarkerMeshLoaded();
+    return null;
+  }
+  return markerMeshParts.map((part, index) => new deck.SimpleMeshLayer({
+    id: `flight-marker-mesh-${index}`,
+    data: [marker],
+    pickable: false,
+    getPosition: (d) => d.position,
+    getOrientation: (d) => d.orientation || [0, 0, 0],
+    getColor: [255, 255, 255, 255],
+    mesh: part.mesh,
+    texture: part.texture,
+    textureParameters: { addressModeU: "repeat", addressModeV: "repeat" },
+    sizeScale: MESH_MARKER_SIZE_SCALE,
+    parameters: { depthTest },
+  }));
+}
+
+// Fetches and parses the glTF v2 binary (GLB) container: a 12-byte header
+// followed by a JSON chunk and a binary chunk.
+async function loadSailplaneMesh(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const buffer = await response.arrayBuffer();
+  const view = new DataView(buffer);
+  let offset = 12;
+  let json = null;
+  let bin = null;
+  while (offset < buffer.byteLength) {
+    const chunkLength = view.getUint32(offset, true);
+    const chunkType = view.getUint32(offset + 4, true);
+    offset += 8;
+    if (chunkType === GLB_CHUNK_JSON) {
+      json = JSON.parse(
+        new TextDecoder().decode(new Uint8Array(buffer, offset, chunkLength)),
+      );
+    } else if (chunkType === GLB_CHUNK_BIN) {
+      bin = new Uint8Array(buffer, offset, chunkLength);
+    }
+    offset += chunkLength;
+  }
+  if (!json || !bin) {
+    throw new Error("missing glTF JSON/BIN chunk");
+  }
+
+  // Merge all mesh primitives into one geometry per material (each of the
+  // model's nodes is untransformed, so vertex positions share one space).
+  const groups = new Map();
+  for (const mesh of json.meshes) {
+    for (const primitive of mesh.primitives) {
+      const materialIndex = primitive.material || 0;
+      let group = groups.get(materialIndex);
+      if (!group) {
+        group = { positions: [], normals: [], texels: [], indices: [], vertexCount: 0 };
+        groups.set(materialIndex, group);
+      }
+      const positions = glbReadAccessor(json, bin, primitive.attributes.POSITION);
+      group.positions.push(positions);
+      group.normals.push(glbReadAccessor(json, bin, primitive.attributes.NORMAL));
+      group.texels.push(glbReadAccessor(json, bin, primitive.attributes.TEXCOORD_0));
+      const indexData = glbReadAccessor(json, bin, primitive.indices);
+      const base = group.vertexCount;
+      for (let i = 0; i < indexData.length; i++) {
+        group.indices.push(indexData[i] + base);
+      }
+      group.vertexCount += positions.length / 3;
+    }
+  }
+
+  const parts = [];
+  for (const [materialIndex, group] of groups) {
+    parts.push(buildMarkerMeshPart(json, bin, materialIndex, group));
+  }
+  return parts;
+}
+
+// Builds one SimpleMeshLayer mesh object + texture URL from a merged
+// material group. The material's tiling transform (KHR_texture_transform)
+// is baked into the texels so the texture can be sampled with repeat
+// addressing.
+function buildMarkerMeshPart(json, bin, materialIndex, group) {
+  const material = json.materials[materialIndex];
+  const textureInfo = material?.pbrMetallicRoughness?.baseColorTexture;
+  const transform = textureInfo?.extensions?.KHR_texture_transform || {};
+  const uvOffset = transform.offset || [0, 0];
+  const uvScale = transform.scale || [1, 1];
+
+  const positions = concatFloat32(group.positions);
+  const normals = concatFloat32(group.normals);
+  const texels = concatFloat32(group.texels);
+  for (let i = 0; i < texels.length; i += 2) {
+    texels[i] = texels[i] * uvScale[0] + uvOffset[0];
+    texels[i + 1] = texels[i + 1] * uvScale[1] + uvOffset[1];
+  }
+
+  return {
+    mesh: {
+      topology: "triangle-list",
+      attributes: {
+        positions: { value: positions, size: 3 },
+        normals: { value: normals, size: 3 },
+        texCoords: { value: texels, size: 2 },
+      },
+      indices: { value: new Uint32Array(group.indices), size: 1 },
+    },
+    texture: glbTextureUrl(json, bin, textureInfo ? textureInfo.index : null),
+  };
+}
+
+// Reads a glTF accessor as one flat typed array (the common tightly packed
+// layout fast path; interleaved buffer views are copied component-wise).
+function glbReadAccessor(json, bin, accessorIndex) {
+  const accessor = json.accessors[accessorIndex];
+  const bufferView = json.bufferViews[accessor.bufferView];
+  const TypedArray = GLB_COMPONENT_ARRAYS[accessor.componentType];
+  const componentCount = GLB_COMPONENT_COUNTS[accessor.type];
+  const componentBytes = TypedArray.BYTES_PER_ELEMENT;
+  const start =
+    bin.byteOffset + (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
+  const packedBytes = componentCount * componentBytes;
+  const stride = bufferView.byteStride || packedBytes;
+  if (
+    stride === packedBytes &&
+    start % componentBytes === 0 &&
+    (bufferView.byteLength || 0) >= accessor.count * packedBytes
+  ) {
+    return new TypedArray(bin.buffer, start, accessor.count * componentCount);
+  }
+  const read = GLB_COMPONENT_READERS[accessor.componentType];
+  const out = new TypedArray(accessor.count * componentCount);
+  const dataView = new DataView(bin.buffer);
+  for (let i = 0; i < accessor.count; i++) {
+    const row = start + i * stride;
+    for (let c = 0; c < componentCount; c++) {
+      out[i * componentCount + c] = read(dataView, row + c * componentBytes);
+    }
+  }
+  return out;
+}
+
+// Object URLs for the embedded texture images (one per material texture).
+function glbTextureUrl(json, bin, textureIndex) {
+  if (textureIndex == null) {
+    return null;
+  }
+  const image = json.images[json.textures[textureIndex].source];
+  const bufferView = json.bufferViews[image.bufferView];
+  const start = bin.byteOffset + (bufferView.byteOffset || 0);
+  const bytes = bin.buffer.slice(start, start + bufferView.byteLength);
+  return URL.createObjectURL(
+    new Blob([bytes], { type: image.mimeType || "image/png" }),
+  );
+}
+
+function concatFloat32(chunks) {
+  let total = 0;
+  for (const chunk of chunks) {
+    total += chunk.length;
+  }
+  const out = new Float32Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
 
 // Rendering style: "ground" (default; maplibre terrain, track clamped onto
 // the terrain surface) or "deck" (experimental; maplibre terrain off, the
@@ -585,27 +818,109 @@ const RENDER_STYLE_PARAM = new URLSearchParams(window.location.search).get(
 const RENDER_STYLE =
   RENDER_STYLE_PARAM === "deck" ? "deck" : "ground";
 
-function initialHeading(path) {
-  if (!path || path.length < 2) {
-    return 0;
-  }
-  return bearingDegrees(path[0], path[1]);
-}
-
 function markerFromDetail(detail) {
   if (!detail || !detail.position) {
     return null;
   }
   if (currentPath.length < 2) {
-    return { position: detail.position, angle: 0 };
+    return { position: detail.position, angle: 0, orientation: [0, 0, 0] };
   }
   const idx = Math.min(Math.max(detail.segIndex, 1), currentPath.length - 1);
   const a = currentPath[idx - 1];
   const b = currentPath[idx];
+  const angle = bearingDegrees(a, b);
+  const prevSample = currentSamples[idx - 1];
+  const nextSample = currentSamples[idx];
+  const tMs =
+    prevSample && nextSample
+      ? prevSample.timeMs + (nextSample.timeMs - prevSample.timeMs) * detail.segT
+      : 0;
   return {
     position: detail.position,
-    angle: bearingDegrees(a, b),
+    angle,
+    orientation: meshMarkerOrientation(angle, tMs, idx),
   };
+}
+
+// 3D marker orientation as deck.gl's [pitch, yaw, roll] degrees: yaw from
+// the track bearing (deck yaw is CCW around up and the GLB nose is +X, so
+// yaw = 90 - bearing points the nose along the compass bearing), pitch
+// from the climb angle (atan2 of vertical over horizontal speed in a
+// window around the replay position) and a bank proportional to the turn
+// rate on top of the constant +90 roll that converts the Y-up GLB to
+// deck's Z-up world. Signs are derived from deck.gl's euler convention and
+// verified with the four-bearing harness test (see the MESH_MARKER_*
+// constants).
+function meshMarkerOrientation(bearingDeg, centerTimeMs, segIndex) {
+  const pitchDeg =
+    MESH_MARKER_PITCH_SIGN *
+    windowedClimbAngleDeg(centerTimeMs, segIndex, MESH_MARKER_WINDOW_MS);
+  const bankDeg =
+    windowedTurnRateDegPerSec(centerTimeMs, segIndex, MESH_MARKER_WINDOW_MS) *
+    MESH_MARKER_BANK_GAIN;
+  return [
+    pitchDeg,
+    90 - bearingDeg,
+    MESH_MARKER_BANK_BASE_DEG +
+      clamp(bankDeg, -MESH_MARKER_BANK_MAX_DEG, MESH_MARKER_BANK_MAX_DEG),
+  ];
+}
+
+// Climb angle in degrees in a window around the replay position.
+function windowedClimbAngleDeg(centerTimeMs, segIndex, windowMs) {
+  const span = windowedSampleSpan(centerTimeMs, segIndex, windowMs);
+  if (!span) {
+    return 0;
+  }
+  const [a, b] = span;
+  const dtSec = Math.max((b.timeMs - a.timeMs) / 1000, 0.001);
+  const horizontalM = haversineMeters(a.lat, a.lon, b.lat, b.lon);
+  const verticalM = b.altM - a.altM;
+  return (Math.atan2(verticalM, Math.max(horizontalM, 1)) * 180) / Math.PI;
+}
+
+// Average turn rate in degrees per second in a window around the replay
+// position (heading change from the window start to its middle vs from
+// the middle to its end), used to bank the 3D marker in turns.
+function windowedTurnRateDegPerSec(centerTimeMs, segIndex, windowMs) {
+  const span = windowedSampleSpan(centerTimeMs, segIndex, windowMs);
+  if (!span) {
+    return 0;
+  }
+  const [a, b] = span;
+  const mid = currentSamples[Math.min(Math.max(segIndex, 1), currentSamples.length - 1)];
+  const dtSec = Math.max((b.timeMs - a.timeMs) / 1000, 0.001);
+  const headingIn = bearingDegrees([a.lon, a.lat], [mid.lon, mid.lat]);
+  const headingOut = bearingDegrees([mid.lon, mid.lat], [b.lon, b.lat]);
+  return shortestAngleDeg(headingOut - headingIn) / dtSec;
+}
+
+// Samples around the replay position spanning windowMs (the same walk as
+// computeWindowedClimbRateMs), as [start, end] or null when unavailable.
+function windowedSampleSpan(centerTimeMs, segIndex, windowMs) {
+  if (currentSamples.length < 2 || segIndex <= 0 || segIndex >= currentSamples.length) {
+    return null;
+  }
+  const halfWindowMs = Math.max(windowMs, 1000) / 2;
+  let left = Math.max(0, segIndex - 1);
+  let right = Math.min(currentSamples.length - 1, segIndex);
+  while (left > 0 && centerTimeMs - currentSamples[left].timeMs < halfWindowMs) {
+    left -= 1;
+  }
+  while (
+    right < currentSamples.length - 1 &&
+    currentSamples[right].timeMs - centerTimeMs < halfWindowMs
+  ) {
+    right += 1;
+  }
+  if (left === right) {
+    return null;
+  }
+  return [currentSamples[left], currentSamples[right]];
+}
+
+function shortestAngleDeg(deltaDeg) {
+  return ((deltaDeg + 540) % 360) - 180;
 }
 
 function buildAdjustedPath(path) {
