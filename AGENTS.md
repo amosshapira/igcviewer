@@ -141,6 +141,20 @@ Ongoing task: this section summarises the prompts given and the actions
 taken on this project (including the related flugbuech fork and the
 homelab deployment repo), newest first. **Append new sessions at the top.**
 
+### 2026-11-27 (cleanup) — branches, worktrees, Hub tags, data
+
+- Prompt: "1: do it, 2: do it, 3: do it, 4: irrelevant/fixed, 5: fixed,
+  6: I'll do it myself. also - delete all but last two docker images
+  from dockerhub."
+- Actions: removed the four merged feature worktrees and the merged
+  local/remote branches (glb-marker, altitude-panel,
+  rendering-style-option, track-popup, viewer-tab-reuse); cleaned 38
+  legacy "NIL" second_pilot values (→ NULL) from the production
+  database; deleted all but the last two version tags from Docker Hub
+  (igcviewer kept latest/v1.16/v1.15, tisot latest/v1.7/v1.6 — 19 tags
+  deleted via the Hub API). The TODO file is now empty of open tasks;
+  the CVE re-scan check remains with Amos.
+
 ### 2026-11-27 (later) — 3D sailplane GLB replay marker implemented (`glb-marker` branch)
 
 - Prompt (from a parent session): implement the queued GLB marker task in
