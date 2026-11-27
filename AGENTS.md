@@ -141,6 +141,29 @@ Ongoing task: this section summarises the prompts given and the actions
 taken on this project (including the related flugbuech fork and the
 homelab deployment repo), newest first. **Append new sessions at the top.**
 
+### 2026-11-28 — post-reboot deploy verification
+
+- Prompt: continuation of the deploy-verification session after the
+  user rebooted picton for security upgrades ("picton is back up —
+  retry verification").
+- Actions: first check showed the stack had come back on the old
+  images (v1.16/v1.7) — the deploy workflow had fired while the host
+  was down and the queued job was never delivered after the runner
+  reconnected (komodo log empty too); re-triggered the pipeline with
+  an empty commit on homelab main (c9d7199) and the stack redeployed
+  on tisot v1.8 + igcviewer v1.17. Verified end-to-end:
+  `tisot-igc.home/api/flight?flight=109` (date 2026-11-18, fixCount
+  11052 — proves the igcviewer→flugbuech token fetch over the docker
+  network), `/sailplane.glb` (200, 6779516 B),
+  `tisot-igc.home/app.js` with `cache-control: no-cache`, the
+  `/api/v1/flights/109/igc/view/` route live (401 unauthenticated, as
+  designed), and the served SvelteKit bundle contains the renderStyle
+  and altunit code (v1.8 was built from the current working tree).
+  Found: the flugbuech working tree has uncommitted changes (Dockerfile
+  bookworm build base + `apt-get upgrade` — the v1.8 CVE fix — and the
+  altunit query parameter in both flights pages) that are baked into
+  the published v1.8 image but not in git; commit proposed to Amos.
+
 ### 2026-11-27 (cleanup) — branches, worktrees, Hub tags, data
 
 - Prompt: "1: do it, 2: do it, 3: do it, 4: irrelevant/fixed, 5: fixed,
