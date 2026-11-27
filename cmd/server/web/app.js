@@ -3,7 +3,7 @@ const uploadBtn = document.getElementById("uploadBtn");
 const playBtn = document.getElementById("playBtn");
 const baseViewSelect = document.getElementById("baseView");
 const playbackSpeedSelect = document.getElementById("playbackSpeed");
-const followCamSelect = document.getElementById("followCam");
+const followCamToggle = document.getElementById("followCam");
 const marker3dToggle = document.getElementById("marker3d");
 const speedUnitSelect = document.getElementById("speedUnit");
 const info = document.getElementById("info");
@@ -283,7 +283,7 @@ baseViewSelect.addEventListener("change", () => {
   applyBaseView(baseViewSelect.value);
 });
 
-followCamSelect?.addEventListener("change", () => {
+followCamToggle?.addEventListener("change", () => {
   if (!isFollowCamEnabled() || !latestPlaybackDetail?.position) {
     return;
   }
@@ -635,8 +635,10 @@ function ensureMarkerMeshLoaded() {
 }
 
 // One SimpleMeshLayer per parsed part, all sharing the marker position and
-// orientation. The layer color is white so the texture shows through
-// (SimpleMeshLayer multiplies the instance color into the texture sample).
+// orientation. The layer color is tinted so the (dark) model stands out
+// against terrain imagery (SimpleMeshLayer multiplies the instance color
+// into the texture sample).
+const MARKER_MESH_COLOR = [255, 96, 0, 255];
 function getMarkerMeshLayers(marker, depthTest) {
   if (!markerMeshParts) {
     ensureMarkerMeshLoaded();
@@ -648,7 +650,7 @@ function getMarkerMeshLayers(marker, depthTest) {
     pickable: false,
     getPosition: (d) => d.position,
     getOrientation: (d) => d.orientation || [0, 0, 0],
-    getColor: [255, 255, 255, 255],
+    getColor: MARKER_MESH_COLOR,
     mesh: part.mesh,
     texture: part.texture,
     textureParameters: { addressModeU: "repeat", addressModeV: "repeat" },
@@ -1020,8 +1022,8 @@ function tickPlayback(ts) {
   if (playbackProgress >= 1) {
     isPlaying = false;
     animationFrameId = null;
-    if (followCamSelect) {
-      followCamSelect.value = "off";
+    if (followCamToggle) {
+      followCamToggle.checked = false;
     }
     playBtn.textContent = "Replay";
     return;
@@ -1247,6 +1249,39 @@ function scheduleGroundProfileComputation() {
     }
     computeGroundProfile();
   });
+}
+
+// While the pointer hovers over the profile, the marker line and the panel
+// stats follow the pointer instead of the replay position (null = follow
+// the replay).
+let profileHoverTimeMs = null;
+
+function profileDisplayDetail() {
+  if (profileHoverTimeMs !== null) {
+    const idx = sampleIndexAtTimeMs(profileHoverTimeMs);
+    if (totalDistanceM > 0) {
+      const progress = clamp(cumulativeDistances[idx] / totalDistanceM, 0, 1);
+      return interpolatePathDetailed(currentPath, cumulativeDistances, totalDistanceM, progress);
+    }
+  }
+  return latestPlaybackDetail;
+}
+
+function sampleIndexAtTimeMs(tMs) {
+  if (!currentSamples.length) {
+    return 0;
+  }
+  let lo = 0;
+  let hi = currentSamples.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (currentSamples[mid].timeMs < tMs) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
 }
 
 function computeGroundProfile() {
@@ -1556,7 +1591,11 @@ function initializeSpeedUnit() {
 }
 
 // Replay time of the marker line, interpolated like computePlaybackStats.
+// While the pointer hovers over the profile, the hovered time wins.
 function currentProfileTimeMs() {
+  if (profileHoverTimeMs !== null) {
+    return profileHoverTimeMs;
+  }
   if (!currentSamples.length) {
     return null;
   }
@@ -1569,6 +1608,32 @@ function currentProfileTimeMs() {
   return prev.timeMs + (next.timeMs - prev.timeMs) * detail.segT;
 }
 
+// Hovering over the profile: the marker line and the panel stats follow the
+// pointer (the replay itself is untouched). On mouseleave they return to the
+// replay position.
+profileCanvas.addEventListener("mousemove", (event) => {
+  if (!profileChartGeom || !profileVisible || currentSamples.length < 2) {
+    return;
+  }
+  const rect = profileCanvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const { left, plotW, t0, t1 } = profileChartGeom;
+  const frac = clamp((x - left) / plotW, 0, 1);
+  profileHoverTimeMs = t0 + frac * (t1 - t0);
+
+  const detail = profileDisplayDetail();
+  updateProfileReplay(detail, computePlaybackStats(detail));
+});
+
+profileCanvas.addEventListener("mouseleave", () => {
+  if (profileHoverTimeMs === null) {
+    return;
+  }
+  profileHoverTimeMs = null;
+  const detail = profileDisplayDetail();
+  updateProfileReplay(detail, computePlaybackStats(detail));
+});
+
 // Click on the altitude profile: seek the replay to the clicked time. Works
 // while playing (playback continues from there) and while paused.
 profileCanvas.addEventListener("click", (event) => {
@@ -1580,6 +1645,7 @@ profileCanvas.addEventListener("click", (event) => {
   const { left, plotW, t0, t1 } = profileChartGeom;
   const frac = clamp((x - left) / plotW, 0, 1);
   const tMs = t0 + frac * (t1 - t0);
+  profileHoverTimeMs = tMs;
 
   // Sample whose time is closest to the clicked position (binary search).
   let lo = 0;
@@ -1821,7 +1887,7 @@ function getPlaybackDurationMs() {
 }
 
 function isFollowCamEnabled() {
-  return (followCamSelect?.value || "on") === "on";
+  return followCamToggle?.checked ?? false;
 }
 
 function formatDate(v) {
