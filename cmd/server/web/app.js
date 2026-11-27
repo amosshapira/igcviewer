@@ -6,6 +6,7 @@ const playbackSpeedSelect = document.getElementById("playbackSpeed");
 const followCamToggle = document.getElementById("followCam");
 const marker3dToggle = document.getElementById("marker3d");
 const speedUnitSelect = document.getElementById("speedUnit");
+const altUnitSelect = document.getElementById("altUnit");
 const info = document.getElementById("info");
 const topbar = document.querySelector(".topbar");
 const profilePanel = document.getElementById("profilePanel");
@@ -175,7 +176,8 @@ map.addControl(new maplibregl.NavigationControl({
 
 map.on("load", async () => {
   initializeMarker3dToggle();
-  initializeSpeedUnit();  applyBaseView(baseViewSelect.value);
+  initializeSpeedUnit();
+  initializeAltUnit();  applyBaseView(baseViewSelect.value);
 
   if (RENDER_STYLE === "deck") {
     // Experimental deck-owned terrain: maplibre stays flat and hidden, the
@@ -640,10 +642,11 @@ function ensureMarkerMeshLoaded() {
 }
 
 // One SimpleMeshLayer per parsed part, all sharing the marker position and
-// orientation. The layer color is tinted so the (dark) model stands out
-// against terrain imagery (SimpleMeshLayer multiplies the instance color
-// into the texture sample).
-const MARKER_MESH_COLOR = [255, 96, 0, 255];
+// orientation. The model texture is intentionally not used: the GLB's
+// baked-in colors are too dark against terrain imagery, and SimpleMeshLayer
+// can only multiply the instance color into the texture (it cannot
+// brighten). A solid bright color reads much better.
+const MARKER_MESH_COLOR = [255, 255, 255, 255];
 function getMarkerMeshLayers(marker, depthTest) {
   if (!markerMeshParts) {
     ensureMarkerMeshLoaded();
@@ -657,8 +660,6 @@ function getMarkerMeshLayers(marker, depthTest) {
     getOrientation: (d) => d.orientation || [0, 0, 0],
     getColor: MARKER_MESH_COLOR,
     mesh: part.mesh,
-    texture: part.texture,
-    textureParameters: { addressModeU: "repeat", addressModeV: "repeat" },
     sizeScale: MESH_MARKER_SIZE_SCALE,
     parameters: { depthTest },
   }));
@@ -1452,6 +1453,11 @@ function drawProfileChart() {
   const yMin = Math.floor(dataMin / yStep) * yStep;
   const yMax = Math.ceil((dataMax + pad) / yStep) * yStep;
 
+  // Display-unit conversion: the chart data stays in metres; the y-axis
+  // labels are shown in the selected altitude unit (metres or feet).
+  const altFactor = altitudeUnit() === "ft" ? M_TO_FT : 1;
+  const altSuffix = altitudeUnit() === "ft" ? " ft" : " m";
+
   const xOf = (tMs) => left + ((tMs - t0) / (t1 - t0)) * plotW;
   const yOf = (alt) => top + (1 - (alt - yMin) / (yMax - yMin)) * plotH;
 
@@ -1473,7 +1479,7 @@ function drawProfileChart() {
     ctx.fillStyle = colors.label;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillText(alt.toLocaleString("en-US"), left - 6, y);
+    ctx.fillText((alt * altFactor).toLocaleString("en-US") + altSuffix, left - 6, y);
   }
 
   // Time axis (HH:MM), ticks aligned to whole multiples of the step.
@@ -1561,6 +1567,55 @@ function formatSpeedKmh(speedKmh) {
   return speedUnit() === "kn"
     ? `${(speedKmh / 1.852).toFixed(1)} kn`
     : `${speedKmh.toFixed(1)} km/h`;
+}
+
+const ALT_UNIT_STORAGE_KEY = "flugbuech-altitude-unit";
+const M_TO_FT = 3.28084;
+
+// Altitude display unit: "m" (default) or "ft", persisted per browser.
+// Applies to the info panel, the replay stats and the profile panel chart;
+// the 3D track geometry stays in metres.
+function altitudeUnit() {
+  return altUnitSelect?.value === "ft" ? "ft" : "m";
+}
+
+function formatAltitudeM(altM) {
+  return altitudeUnit() === "ft"
+    ? `${Math.round(altM * M_TO_FT).toLocaleString("en-US")} ft`
+    : `${Math.round(altM).toLocaleString("en-US")} m`;
+}
+
+function initializeAltUnit() {
+  if (!altUnitSelect) {
+    return;
+  }
+  const urlUnit = new URLSearchParams(window.location.search).get("altunit");
+  if (urlUnit === "ft" || urlUnit === "m") {
+    altUnitSelect.value = urlUnit;
+  } else {
+    try {
+      const stored = localStorage.getItem(ALT_UNIT_STORAGE_KEY);
+      if (stored === "ft" || stored === "m") {
+        altUnitSelect.value = stored;
+      }
+    } catch {
+      // localStorage may be unavailable; the default stays in effect.
+    }
+  }
+  altUnitSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem(ALT_UNIT_STORAGE_KEY, altUnitSelect.value);
+    } catch {
+      // Same as above: the select still applies for this session.
+    }
+    const detail = latestPlaybackDetail;
+    if (detail) {
+      const stats = computePlaybackStats(detail);
+      updateReplayStats(stats);
+      updateProfileReplay(detail, stats);
+    }
+    drawProfileChart();
+  });
 }
 
 function initializeSpeedUnit() {
@@ -1737,8 +1792,8 @@ function updateProfileReplay(detail, stats) {
 
   const altMsl = sampleAltitudeAtDetail(detail);
   const groundM = groundElevationAtDetail(detail);
-  profileAltMslEl.textContent = altMsl === null ? "–" : `${Math.round(altMsl)} m`;
-  profileAglEl.textContent = altMsl === null || groundM === null ? "–" : `${Math.round(altMsl - groundM)} m`;
+  profileAltMslEl.textContent = altMsl === null ? "–" : formatAltitudeM(altMsl);
+  profileAglEl.textContent = altMsl === null || groundM === null ? "–" : formatAltitudeM(altMsl - groundM);
   profileClimbEl.textContent = stats ? formatClimbRate(stats.climbRateMs) : "–";
   profileSpeedEl.textContent = stats ? formatSpeedKmh(stats.speedKmh) : "–";
 
@@ -1863,7 +1918,7 @@ function renderInfo(flight) {
     <div><span class="k">Start:</span> <span class="v">${escapeHtml(start)}</span></div>
     <div><span class="k">End:</span> <span class="v">${escapeHtml(end)}</span></div>
     <div><span class="k">Max Climb Rate:</span> <span class="v">${escapeHtml(formatClimbRate(maxRate))}</span></div>
-    <div><span class="k">Max. altitude (MSL):</span> <span class="v">${escapeHtml(maxAlt)}</span></div>
+    <div><span class="k">Max. altitude (MSL):</span> <span class="v">${escapeHtml(formatAltitudeM(maxAlt))}</span></div>
     <hr />
     <div><span class="k">Replay progress:</span> <span class="v" id="progressValue">0.0%</span></div>
     <div><span class="k">Replay elapsed:</span> <span class="v" id="elapsedValue">00:00:00</span></div>
