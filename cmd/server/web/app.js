@@ -83,6 +83,11 @@ const PROFILE_CHART_COLORS = {
 
 let latestPlaybackDetail = null;
 let syncingFollowCamera = false;
+// While the pointer hovers over the profile, the marker line and the panel
+// stats follow the pointer instead of the replay position (null = follow
+// the replay). Declared early: currentProfileTimeMs (called during the
+// flight load when the profile panel is enabled) reads it.
+let profileHoverTimeMs = null;
 
 const MARKER_3D_STORAGE_KEY = "flugbuech-marker-3d";
 
@@ -1250,11 +1255,6 @@ function scheduleGroundProfileComputation() {
     computeGroundProfile();
   });
 }
-
-// While the pointer hovers over the profile, the marker line and the panel
-// stats follow the pointer instead of the replay position (null = follow
-// the replay).
-let profileHoverTimeMs = null;
 
 function profileDisplayDetail() {
   if (profileHoverTimeMs !== null) {
